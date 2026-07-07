@@ -1,0 +1,19 @@
+summarizer:
+  - changed-files:
+      - any-glob-to-any-file: 'summarizer/**'
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file: 'tests/**'
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: '.github/**'
+
+docker:
+  - changed-files:
+      - any-glob-to-any-file: ['Dockerfile', 'compose-snippet.yml']
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file: ['**/*.md']

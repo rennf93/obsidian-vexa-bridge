@@ -1,0 +1,21 @@
+name: Greetings
+
+on: [pull_request_target, issues]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  greeting:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/first-interaction@v3
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          issue_message: >
+            Thanks for opening your first issue on obsidian-vexa-bridge! A maintainer will take a look.
+            This is the Vexa → Obsidian sink adapter (it summarizes completed Vexa meetings into Obsidian
+            notes); if your issue is about Vexa itself, please file it against the Vexa project instead.
+          pr_message: >
+            Thanks for your first pull request! Please make sure `make lint` and `make test` pass.

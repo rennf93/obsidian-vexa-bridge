@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-07
+
+### Added
+- GitHub community + workflow ecosystem (FUNDING, issue/PR templates, dependabot, labeler + labels, code-ql, stale, sync-labels, greetings), release automation (`release.yml` — auto-builds + pushes the image to GHCR + Docker Hub on release publish), a CLA assistant workflow + CLA.md, and a `scripts/bump_version.py` helper. Parity with `discord-vexa-bridge`.
+
 ## [0.1.0] - 2026-07-07
 
 ### Added
