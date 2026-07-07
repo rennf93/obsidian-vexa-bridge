@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'summarizer/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.pre-commit-config.yaml'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: pip install uv
+      - run: uv sync --extra dev
+      - run: uv run pre-commit run --all-files
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: pip install uv
+      - run: uv sync --extra dev
+      - name: Run tests
+        run: uv run pytest -v
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build image
+        run: docker build -t obsidian-vexa-bridge:ci .
+      - name: Smoke test (Python 3.11 + deps import + summarizer package import inside the image)
+        run: |
+          docker run --rm obsidian-vexa-bridge:ci python -c "import sys; assert sys.version_info[:2]==(3,11), sys.version; import litellm, aiohttp; import summarizer.__main__; print('image OK', sys.version)"

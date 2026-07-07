@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Claude Code
+.claude/agents/*
+.claude/commands/*
+.claude/hooks/*
+.claude/scripts/*
+.claude/skills/*
+
+# Superpowers (session-private design + plans)
+.superpowers/*
+
+# Environment (local secrets — tokens must never commit)
+.env.local
+.env.*.local

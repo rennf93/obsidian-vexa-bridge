@@ -1,0 +1,47 @@
+[project]
+name = "obsidian-vexa-bridge"
+version = "0.1.0"
+description = "Sink adapter: summarize completed Vexa meetings into Obsidian notes (LLM via OpenAI-compatible endpoint, filesystem/MCP sinks)."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Renzo Franceschini" }]
+# Pinned to 3.11 for parity with discord-vexa-bridge (the source adapter).
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "litellm",
+    "aiohttp",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+    "mypy",
+    "bandit",
+    "pre-commit",
+]
+
+[project.urls]
+Homepage = "https://github.com/rennf93/obsidian-vexa-bridge"
+Repository = "https://github.com/rennf93/obsidian-vexa-bridge"
+Issues = "https://github.com/rennf93/obsidian-vexa-bridge/issues"
+
+# This is a runnable application, not a published package — don't try to build it.
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
