@@ -26,6 +26,16 @@ no-charge, royalty-free, irrevocable copyright license to reproduce, prepare der
 of, publicly display, publicly perform, sublicense, and distribute Your contributions and such
 derivative works.
 
+You further grant the Maintainer the right to license and re-license Your contributions under any
+license terms, including the AGPL-3.0, other open-source licenses, and proprietary or commercial
+license terms, and to sublicense these rights through multiple tiers of sublicensees. You
+acknowledge that this right is what enables the Project to be offered under dual-licensing or
+commercial terms in the future.
+
+For clarity, this grant is in addition to — and does not limit — the rights You grant to the
+public when Your contributions are distributed as part of the Project under its then-current
+open-source license (currently AGPL-3.0).
+
 ## 3. Grant of patent license
 
 Subject to the terms and conditions of this agreement, You grant to the Maintainer and to
