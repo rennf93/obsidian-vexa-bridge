@@ -14,6 +14,13 @@ This is the **sink** half of an in/out adapter pair around Vexa:
 
 Same pattern, opposite direction, separate repo + image + release cadence.
 
+> **Which Vexa version?** This adapter is **REST-only** and rides Vexa's sealed API surface, so
+> reads are future-proof against Vexa **0.12** (it consumes the free-form meeting `data` field).
+> Writing summaries back into Vexa is **OFF by default** — Vexa 0.12 has no external write surface
+> for processed views yet; that surface is tracked for the **0.12.x** line
+> ([Vexa #477](https://github.com/Vexa-ai/vexa/issues/477)). Until it lands, the Obsidian vault is
+> the source of truth. See [Which Vexa version?](docs/usage/vexa-version-targeting.md) for details.
+
 ---
 
 ## How it works

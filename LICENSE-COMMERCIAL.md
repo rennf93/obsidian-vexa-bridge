@@ -23,8 +23,7 @@ obligation for your deployment.
 
 To request a commercial license, open an issue in
 [rennf93/obsidian-vexa-bridge](https://github.com/rennf93/obsidian-vexa-bridge/issues)
-or contact `commercial@renzf.dev` (placeholder — replace with your contact address).
-<!-- TODO: replace the contact address above with the real commercial-license contact. -->
+or contact `contact@guard-core.com`.
 
 ## Contributions
 
