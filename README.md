@@ -1,7 +1,8 @@
 # obsidian-vexa-bridge
 
 [![CI](https://github.com/rennf93/obsidian-vexa-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/rennf93/obsidian-vexa-bridge/actions/workflows/ci.yml)
-[![License: MIT](LICENSE)](LICENSE)
+[![Docs](https://github.com/rennf93/obsidian-vexa-bridge/actions/workflows/docs.yml/badge.svg)](https://rennf93.github.io/obsidian-vexa-bridge/)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
 
 Turn completed [Vexa](https://github.com/Vexa-ai/vexa) meetings into structured Obsidian notes — speaker-tagged, summarized by an LLM, and written to a folder that syncs into your vault. One service covers every platform Vexa records (Discord, Google Meet, Zoom, Teams).
@@ -12,6 +13,13 @@ This is the **sink** half of an in/out adapter pair around Vexa:
 - **`obsidian-vexa-bridge`** (this repo) — the *sink* adapter: Vexa transcripts → Obsidian notes. It polls Vexa for completed meetings across all platforms, summarizes each through an OpenAI-compatible LLM, writes a structured markdown note to a filesystem sink synced into the vault, and optionally writes the summary back to the Vexa meeting's `notes` field.
 
 Same pattern, opposite direction, separate repo + image + release cadence.
+
+> **Which Vexa version?** This adapter is **REST-only** and rides Vexa's sealed API surface, so
+> reads are future-proof against Vexa **0.12** (it consumes the free-form meeting `data` field).
+> Writing summaries back into Vexa is **OFF by default** — Vexa 0.12 has no external write surface
+> for processed views yet; that surface is tracked for the **0.12.x** line
+> ([Vexa #477](https://github.com/Vexa-ai/vexa/issues/477)). Until it lands, the Obsidian vault is
+> the source of truth. See [Which Vexa version?](docs/usage/vexa-version-targeting.md) for details.
 
 ---
 
@@ -122,6 +130,10 @@ make build              # build the Docker image
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). The service is the `summarizer/` package; run it with `python -m summarizer` (or `--once` for a single pass).
 
+## Documentation
+
+Full docs are published at <https://rennf93.github.io/obsidian-vexa-bridge/> (source in [`docs/`](docs/) + [`mkdocs.yml`](mkdocs.yml)).
+
 ## License
 
-[MIT](LICENSE) (c) Renzo Franceschini. Not affiliated with Obsidian or Vexa.
+Open-source use is licensed under [AGPL-3.0-or-later](LICENSE). A commercial license is available for entities that cannot comply with AGPL §13 (closed SaaS / proprietary embedding) — see [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md). Not affiliated with Obsidian or Vexa.

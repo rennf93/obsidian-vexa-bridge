@@ -1,0 +1,54 @@
+site_name: obsidian-vexa-bridge
+site_url: https://rennf93.github.io/obsidian-vexa-bridge/
+repo_url: https://github.com/rennf93/obsidian-vexa-bridge
+repo_name: rennf93/obsidian-vexa-bridge
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - content.code.copy
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - attr_list
+  - md_in_html
+
+nav:
+  - Overview: index.md
+  - Usage:
+      - Deploy: usage/deploy.md
+      - Configuration: usage/config.md
+      - LLM routing (ollama): usage/llm-routing.md
+      - Vexa version targeting: usage/vexa-version-targeting.md
+      - Troubleshooting: usage/troubleshooting.md
+      - Limitations: usage/limitations.md
+  - Development:
+      - Architecture: dev/architecture.md
+      - Source layout: dev/layout.md
+      - Testing: dev/testing.md
+      - Contributing: dev/contributing.md
+      - Releasing: dev/releasing.md
