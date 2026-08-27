@@ -141,6 +141,60 @@ async def wait_for_commit(
         elapsed += interval_seconds
 
 
+async def finalize_graph_pass(cfg: Config, uploaded: int, *, wait_for_agent_commit: bool = False) -> None:
+    """Shared graph-mode post-pass: trigger the fold routine, push, and pull. Called from both
+    the poll pass (summarizer.__main__._run_once_graph) and the webhook event path
+    (summarizer.__main__.process_event_meeting) right after their process_meeting loop, so there
+    is exactly one place that owns this ordering. Callers gate the call on `not cfg.dry_run`
+    themselves -- a dry run must call neither this nor anything it wraps.
+
+    When uploaded > 0, this fires trigger_routine_now so the fold happens within minutes instead
+    of waiting for the routine's cron; that trigger is best-effort like the push and the pull
+    below, so a failure there is logged and the cron picks it up next tick.
+
+    wait_for_agent_commit=True (the event path only) additionally waits for the agent's commit
+    before pushing: it records the workspace's HEAD sha before triggering the fold (best-effort;
+    a failure there just means "unknown base", not a hard stop), then after triggering polls for
+    a new commit up to cfg.webhook_commit_wait_seconds. Seeing the commit lets the push go out
+    right away instead of waiting for the next poll pass; a timeout logs a warning and still
+    pushes once (harmless if nothing is ahead), so the poll pass remains the eventual backstop
+    either way. The poll path (wait_for_agent_commit=False, the default) skips this wait and
+    pushes on whatever push_if_ahead reports from git-remote-status.
+
+    The push and the pull are always best-effort: an Agent API failure there is logged and the
+    pass still counts, so a scheduler that is not wired yet or a diverged remote never blocks
+    transcript delivery.
+    """
+    if uploaded > 0:
+        base: str | None = None
+        if wait_for_agent_commit:
+            try:
+                base = await agent_api.git_head(cfg)
+            except Exception as exc:
+                log.warning("git HEAD check before the agent run failed (waiting for any commit): %s", exc)
+        try:
+            await trigger_routine_now(cfg)
+        except Exception as exc:
+            log.warning("immediate routine run failed (the cron picks it up): %s", exc)
+        if wait_for_agent_commit:
+            seen = await wait_for_commit(
+                cfg,
+                base,
+                timeout_seconds=cfg.webhook_commit_wait_seconds,
+                interval_seconds=cfg.webhook_commit_poll_seconds,
+            )
+            if not seen:
+                log.warning(
+                    "agent commit not seen within %s s; the poll pass pushes it later",
+                    cfg.webhook_commit_wait_seconds,
+                )
+    try:
+        await push_if_ahead(cfg)
+    except Exception as exc:
+        log.warning("workspace push failed (resolve on the repo or via /agent/workspace/pull): %s", exc)
+    pull_vault(cfg)
+
+
 def pull_vault(cfg: Config, run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run) -> bool:
     """Fast-forward <VAULT_DIR>/<vault_folder> from its remote. Never merges, never raises: the vault
     folder is a read-only mirror, so a non-fast-forward means someone edited it locally and the

@@ -39,16 +39,13 @@ import sys
 from dataclasses import dataclass
 
 from summarizer import config as _config_mod
-from summarizer.agent_api import git_head, upload
+from summarizer.agent_api import upload
 from summarizer.config import Config, ConfigError
 from summarizer.graph import (
     ensure_routine,
-    pull_vault,
-    push_if_ahead,
+    finalize_graph_pass,
     render_transcript,
     transcript_filename,
-    trigger_routine_now,
-    wait_for_commit,
 )
 from summarizer.llm import summarize  # async; litellm lazy-imported inside
 from summarizer.obsidian import assemble_note, create_note, note_path, write_note_fs
@@ -183,19 +180,14 @@ async def run_once(cfg: Config) -> PassResult:
 
 
 async def _run_once_graph(cfg: Config, store: StateStore, meetings: list[Meeting]) -> PassResult:
-    """Graph mode pass: upload each new transcript to the workspace inbox, trigger an immediate
-    fold, then push and pull.
+    """Graph mode pass: upload each new transcript to the workspace inbox, then finalize (trigger
+    an immediate fold, push, pull) via finalize_graph_pass.
 
     mark_done commits at upload (the agent owns everything after that). The routine check runs
     once per process (module-level _routine_ready latch) rather than every pass, and never in
-    DRY_RUN (a dry run must write nothing, on Vexa's side included); a failure
-    leaves the latch unset so the next pass retries it. When the pass uploaded anything (and
-    it's not a dry run), it also fires trigger_routine_now so the fold happens within minutes
-    instead of waiting for the routine's cron; that trigger is best-effort like the push and the
-    pull below, so a failure there is logged and the cron picks it up next tick. The push and
-    the pull are best-effort per pass: an Agent API failure there is logged and the pass still
-    counts, so a scheduler that is not wired yet or a diverged remote never blocks transcript
-    delivery.
+    DRY_RUN (a dry run must write nothing, on Vexa's side included); a failure leaves the latch
+    unset so the next pass retries it. See finalize_graph_pass for the trigger/push/pull details
+    (this path uses its defaults: no wait for the agent's commit before pushing).
     """
     global _routine_ready
     result = PassResult()
@@ -211,16 +203,7 @@ async def _run_once_graph(cfg: Config, store: StateStore, meetings: list[Meeting
         await process_meeting(cfg, store, meeting, result)
 
     if not cfg.dry_run:
-        if result.uploaded > 0:
-            try:
-                await trigger_routine_now(cfg)
-            except Exception as exc:
-                log.warning("immediate routine run failed (the cron picks it up): %s", exc)
-        try:
-            await push_if_ahead(cfg)
-        except Exception as exc:
-            log.warning("workspace push failed (resolve on the repo or via /agent/workspace/pull): %s", exc)
-        pull_vault(cfg)
+        await finalize_graph_pass(cfg, result.uploaded)
     return result
 
 
@@ -230,45 +213,16 @@ async def process_event_meeting(cfg: Config, meeting: Meeting) -> PassResult:
     mark_low_transcript=False: the event can fire before Vexa's last transcript flush, so a
     below-minimum transcript is left for the next poll instead of being permanently skipped.
 
-    In graph mode, when something was uploaded, this also waits for the agent's commit before
-    pushing: it records the workspace's HEAD sha before triggering the fold (best-effort; a
-    failure there just means "unknown base", not a hard stop), triggers the fold, then polls for
-    a new commit up to WEBHOOK_COMMIT_WAIT_SECONDS. Seeing the commit lets the push go out right
-    away instead of waiting for the next poll pass; a timeout logs a warning and still pushes
-    once (harmless if nothing is ahead) so the poll pass remains the eventual backstop either
-    way. Note mode has nothing else to do once process_meeting returns.
+    In graph mode, finalize_graph_pass(..., wait_for_agent_commit=True) waits for the agent's
+    commit before pushing, so the push goes out right away instead of waiting for the next poll
+    pass. Note mode has nothing else to do once process_meeting returns.
     """
     store = StateStore(cfg.state_dir / "state.json")
     result = PassResult()
     await process_meeting(cfg, store, meeting, result, mark_low_transcript=False)
 
     if cfg.bridge_mode == "graph" and not cfg.dry_run:
-        if result.uploaded > 0:
-            base: str | None = None
-            try:
-                base = await git_head(cfg)
-            except Exception as exc:
-                log.warning("git HEAD check before the agent run failed (waiting for any commit): %s", exc)
-            try:
-                await trigger_routine_now(cfg)
-            except Exception as exc:
-                log.warning("immediate routine run failed (the cron picks it up): %s", exc)
-            seen = await wait_for_commit(
-                cfg,
-                base,
-                timeout_seconds=cfg.webhook_commit_wait_seconds,
-                interval_seconds=cfg.webhook_commit_poll_seconds,
-            )
-            if not seen:
-                log.warning(
-                    "agent commit not seen within %s s; the poll pass pushes it later",
-                    cfg.webhook_commit_wait_seconds,
-                )
-        try:
-            await push_if_ahead(cfg)
-        except Exception as exc:
-            log.warning("workspace push failed (resolve on the repo or via /agent/workspace/pull): %s", exc)
-        pull_vault(cfg)
+        await finalize_graph_pass(cfg, result.uploaded, wait_for_agent_commit=True)
 
     return result
 

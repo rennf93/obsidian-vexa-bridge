@@ -8,7 +8,7 @@ record_failure on any exception). DRY_RUN skips sink writes + mark_done.
 from datetime import UTC, datetime
 
 from summarizer import __main__ as m
-from summarizer import config
+from summarizer import agent_api, config, graph
 from summarizer.types import Meeting, Utterance
 
 
@@ -313,11 +313,14 @@ def _patch_graph(
     monkeypatch.setattr(m, "get_transcript", fake_transcript)
     monkeypatch.setattr(m, "upload", fake_upload)
     monkeypatch.setattr(m, "ensure_routine", fake_ensure)
-    monkeypatch.setattr(m, "push_if_ahead", fake_push)
-    monkeypatch.setattr(m, "pull_vault", fake_pull)
-    monkeypatch.setattr(m, "trigger_routine_now", fake_trigger)
-    monkeypatch.setattr(m, "git_head", fake_head)
-    monkeypatch.setattr(m, "wait_for_commit", fake_wait)
+    # push_if_ahead / pull_vault / trigger_routine_now / wait_for_commit are now called from
+    # inside graph.finalize_graph_pass, not from __main__ directly, so patch them where the
+    # calls actually happen (mirrors summarizer.graph's own test module).
+    monkeypatch.setattr(graph, "push_if_ahead", fake_push)
+    monkeypatch.setattr(graph, "pull_vault", fake_pull)
+    monkeypatch.setattr(graph, "trigger_routine_now", fake_trigger)
+    monkeypatch.setattr(agent_api, "git_head", fake_head)
+    monkeypatch.setattr(graph, "wait_for_commit", fake_wait)
     monkeypatch.setattr(m, "summarize", must_not_summarize)
     monkeypatch.setattr(m, "_routine_ready", False)
 
@@ -710,7 +713,7 @@ async def test_process_event_meeting_passes_base_sha_and_cfg_timeouts_to_wait(tm
         return True
 
     _patch_graph(monkeypatch, [], head_fn=head)
-    monkeypatch.setattr(m, "wait_for_commit", fake_wait)
+    monkeypatch.setattr(graph, "wait_for_commit", fake_wait)
     cfg = _graph_cfg(tmp_path)
     cfg.webhook_commit_wait_seconds = 42.0
     cfg.webhook_commit_poll_seconds = 3.0
@@ -729,7 +732,7 @@ async def test_process_event_meeting_git_head_error_before_trigger_is_best_effor
         return True
 
     _patch_graph(monkeypatch, [], head_fn=head)
-    monkeypatch.setattr(m, "wait_for_commit", fake_wait)
+    monkeypatch.setattr(graph, "wait_for_commit", fake_wait)
     with caplog.at_level("WARNING", logger="vexa-summarizer"):
         result = await m.process_event_meeting(_graph_cfg(tmp_path), _meeting())
     assert result.uploaded == 1
@@ -759,3 +762,32 @@ async def test_process_event_meeting_graph_mode_no_trigger_when_nothing_uploaded
     assert result.uploaded == 0
     assert result.skipped == 1
     assert triggered == []
+
+
+# --- both graph-mode call sites route through the shared finalize helper ------------------
+
+
+async def test_poll_and_event_paths_both_call_the_shared_finalize_helper(tmp_path, monkeypatch):
+    """The poll pass (_run_once_graph, via run_once) and the webhook event path
+    (process_event_meeting) must both delegate the trigger/wait/push/pull sequence to
+    graph.finalize_graph_pass rather than duplicating it, with the poll path taking the
+    defaults (no wait for the agent's commit) and the event path opting into the wait."""
+    calls = []
+
+    async def fake_finalize(cfg, uploaded, *, wait_for_agent_commit=False):
+        calls.append((uploaded, wait_for_agent_commit))
+
+    async def upload(cfg, filename, content):
+        return "uploads/x"
+
+    _patch_graph(monkeypatch, [_meeting()], upload_fn=upload)
+    monkeypatch.setattr(m, "finalize_graph_pass", fake_finalize)
+
+    result = await m.run_once(_graph_cfg(tmp_path))
+    assert result.uploaded == 1
+    assert calls == [(1, False)]
+
+    calls.clear()
+    result = await m.process_event_meeting(_graph_cfg(tmp_path), _meeting(mid=8, native="d8"))
+    assert result.uploaded == 1
+    assert calls == [(1, True)]
