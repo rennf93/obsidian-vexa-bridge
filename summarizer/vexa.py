@@ -96,6 +96,14 @@ async def get_transcript(cfg: Config, meeting: Meeting) -> list[Utterance]:
     url = f"{cfg.vexa_api_url}/transcripts/{meeting.platform}/{meeting.native_meeting_id}"
     status, data = await _http_get_json(url, _headers(cfg))
     if status != 200:
+        # The 0.12 api-gateway's transcript route validates `platform` against a fixed
+        # enum (google_meet/zoom/teams/browser_session); platforms outside it, notably
+        # discord, come back 422, even though GET /meetings lists them fine. When a
+        # direct Postgres DSN is configured, fall back to it: the DB is the source of
+        # truth for meetings the discord-bridge writes straight into `transcriptions`.
+        # Opt-in: unset VEXA_DATABASE_URL and this behaves exactly as before.
+        if cfg.vexa_database_url:
+            return await _get_transcript_from_db(cfg, meeting)
         raise VexaError(f"GET transcripts -> HTTP {status}")
     # Real shape (verified against the live api-gateway): a meeting object with a
     # "segments" array; each segment has start/end (second offsets), text, speaker.
@@ -124,6 +132,35 @@ async def get_transcript(cfg: Config, meeting: Meeting) -> list[Utterance]:
     ]
     utts.sort(key=lambda u: u.start_time)
     return utts
+
+
+async def _get_transcript_from_db(cfg: Config, meeting: Meeting) -> list[Utterance]:
+    """Direct-Postgres transcript fallback. See get_transcript for why.
+
+    Reads the same `transcriptions` rows the discord-bridge inserts (speaker, text,
+    second-offset start/end), ordered by start time. No gateway round-trip.
+    """
+    import asyncpg
+
+    from summarizer.types import Utterance
+
+    conn = await asyncpg.connect(cfg.vexa_database_url)
+    try:
+        rows = await conn.fetch(
+            "SELECT speaker, text, start_time, end_time FROM transcriptions WHERE meeting_id=$1 ORDER BY start_time",
+            meeting.id,
+        )
+    finally:
+        await conn.close()
+    return [
+        Utterance(
+            speaker=str(r["speaker"] or "Unknown"),
+            start_time=float(r["start_time"]),
+            end_time=float(r["end_time"]),
+            text=str(r["text"] or ""),
+        )
+        for r in rows
+    ]
 
 
 async def write_notes(cfg: Config, meeting: Meeting, markdown: str) -> None:
