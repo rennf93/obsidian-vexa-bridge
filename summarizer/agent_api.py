@@ -1,7 +1,8 @@
 """Client for the five Vexa Agent API routes graph mode needs, via the gateway's /agent/* proxy.
 
 Routes (Vexa 0.12.x, self-hosted compose only; hosted and Kubernetes answer 502 on /agent/*):
-  POST /agent/workspace/upload            multipart field "files" -> {"uploaded": [{name, path}]}
+  POST /agent/workspace/upload            multipart field "files" -> {"files": [{name, path}]}
+                                          (live 0.12.22; an "uploaded" key or a bare list is accepted too)
   GET  /agent/routines                    -> {"routines": [...]} (a bare list is also accepted)
   POST /agent/routines                    {name, cron, prompt, run_now} -> 201; 501 if no scheduler
   GET  /agent/workspace/git-remote-status -> {tracked, ahead, behind, remote, branch, ...}
@@ -42,7 +43,8 @@ async def upload(cfg: Config, filename: str, content: str) -> str:
         f"{cfg.vexa_api_url}/agent/workspace/upload", _headers(cfg), "files", filename, content
     )
     _check(status, data, "POST /agent/workspace/upload")
-    rows = data.get("uploaded") if isinstance(data, dict) else data
+    # Live 0.12.22 answers {"files": [{name, path}]}; accept "uploaded" and a bare list too.
+    rows = (data.get("files") or data.get("uploaded")) if isinstance(data, dict) else data
     if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict) or "path" not in rows[0]:
         raise AgentApiError(f"unexpected upload response: {str(data)[:200]}", status)
     return str(rows[0]["path"])
