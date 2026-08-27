@@ -78,6 +78,77 @@ def _meta_from(meeting: Meeting, utts: list[Utterance], duration: float) -> Meet
     )
 
 
+async def process_meeting(
+    cfg: Config,
+    store: StateStore,
+    meeting: Meeting,
+    result: PassResult,
+    *,
+    mark_low_transcript: bool = True,
+) -> None:
+    """Process one meeting: done/poisoned check, transcript fetch, min-duration gate, then
+    mode-specific handling (note: summarize + sink + notes + mark_done; graph: render + upload
+    + mark_done). Shared by run_once's loop, _run_once_graph's loop, and the webhook path
+    (process_event_meeting) so there is exactly one place that owns per-meeting error handling.
+
+    mark_low_transcript=False skips mark_skipped on the min-duration gate: used by the webhook
+    path, where an event can fire before Vexa's last transcript flush lands, so a meeting must
+    stay eligible for the next poll rather than being permanently marked skipped.
+    """
+    key = meeting.id
+    if store.is_done(key) or store.is_poisoned(key):
+        result.idle += 1
+        return
+    try:
+        utts = await get_transcript(cfg, meeting)
+        duration = sum(u.end_time - u.start_time for u in utts)
+        if duration < cfg.min_transcript_seconds:
+            if mark_low_transcript:
+                store.mark_skipped(key, "low-transcript")
+            result.skipped += 1
+            log.info("meeting %s skipped: %.1fs < %.1fs min", key, duration, cfg.min_transcript_seconds)
+            return
+
+        meta = _meta_from(meeting, utts, duration)
+
+        if cfg.bridge_mode == "graph":
+            filename = transcript_filename(meta)
+            content = render_transcript(meta, utts)
+            if cfg.dry_run:
+                result.uploaded += 1
+                log.info("[DRY_RUN] meeting %s -> would upload %s", key, filename)
+                return
+            uploaded_path = await upload(cfg, filename, content)
+            store.mark_done(key, uploaded_path)
+            result.uploaded += 1
+            log.info("meeting %s uploaded -> %s", key, uploaded_path)
+            return
+
+        summary_md = await summarize(utts, meta, cfg)
+        note_md = assemble_note(meta, summary_md, utts, cfg)
+        path = note_path(meeting, meta.participants, cfg) if cfg.obsidian_enabled else None
+
+        if cfg.dry_run:
+            result.summarized += 1
+            log.info("[DRY_RUN] meeting %s -> would write %s", key, path)
+            return
+
+        if cfg.obsidian_enabled:
+            if cfg.obsidian_sink == "fs":
+                await write_note_fs(cfg, path, note_md)  # type: ignore[arg-type]
+            else:
+                await create_note(cfg, path, note_md)  # type: ignore[arg-type]
+        if cfg.vexa_notes_enabled:
+            await write_notes(cfg, meeting, note_md)
+        store.mark_done(key, path)
+        result.summarized += 1
+        log.info("meeting %s summarized -> %s", key, path)
+    except Exception as exc:
+        store.record_failure(key)
+        result.failed += 1
+        log.warning("meeting %s failed: %s", key, exc)
+
+
 async def run_once(cfg: Config) -> PassResult:
     if not cfg.summarize_enabled:
         log.info("SUMMARIZE_ENABLED=false; skipping pass")
@@ -96,43 +167,7 @@ async def run_once(cfg: Config) -> PassResult:
         return await _run_once_graph(cfg, store, meetings)
 
     for meeting in meetings:
-        key = meeting.id
-        if store.is_done(key) or store.is_poisoned(key):
-            result.idle += 1
-            continue
-        try:
-            utts = await get_transcript(cfg, meeting)
-            duration = sum(u.end_time - u.start_time for u in utts)
-            if duration < cfg.min_transcript_seconds:
-                store.mark_skipped(key, "low-transcript")
-                result.skipped += 1
-                log.info("meeting %s skipped: %.1fs < %.1fs min", key, duration, cfg.min_transcript_seconds)
-                continue
-
-            meta = _meta_from(meeting, utts, duration)
-            summary_md = await summarize(utts, meta, cfg)
-            note_md = assemble_note(meta, summary_md, utts, cfg)
-            path = note_path(meeting, meta.participants, cfg) if cfg.obsidian_enabled else None
-
-            if cfg.dry_run:
-                result.summarized += 1
-                log.info("[DRY_RUN] meeting %s -> would write %s", key, path)
-                continue
-
-            if cfg.obsidian_enabled:
-                if cfg.obsidian_sink == "fs":
-                    await write_note_fs(cfg, path, note_md)  # type: ignore[arg-type]
-                else:
-                    await create_note(cfg, path, note_md)  # type: ignore[arg-type]
-            if cfg.vexa_notes_enabled:
-                await write_notes(cfg, meeting, note_md)
-            store.mark_done(key, path)
-            result.summarized += 1
-            log.info("meeting %s summarized -> %s", key, path)
-        except Exception as exc:
-            store.record_failure(key)
-            result.failed += 1
-            log.warning("meeting %s failed: %s", key, exc)
+        await process_meeting(cfg, store, meeting, result)
 
     return result
 
@@ -163,33 +198,7 @@ async def _run_once_graph(cfg: Config, store: StateStore, meetings: list[Meeting
             _routine_ready = True
 
     for meeting in meetings:
-        key = meeting.id
-        if store.is_done(key) or store.is_poisoned(key):
-            result.idle += 1
-            continue
-        try:
-            utts = await get_transcript(cfg, meeting)
-            duration = sum(u.end_time - u.start_time for u in utts)
-            if duration < cfg.min_transcript_seconds:
-                store.mark_skipped(key, "low-transcript")
-                result.skipped += 1
-                log.info("meeting %s skipped: %.1fs < %.1fs min", key, duration, cfg.min_transcript_seconds)
-                continue
-            meta = _meta_from(meeting, utts, duration)
-            filename = transcript_filename(meta)
-            content = render_transcript(meta, utts)
-            if cfg.dry_run:
-                result.uploaded += 1
-                log.info("[DRY_RUN] meeting %s -> would upload %s", key, filename)
-                continue
-            path = await upload(cfg, filename, content)
-            store.mark_done(key, path)
-            result.uploaded += 1
-            log.info("meeting %s uploaded -> %s", key, path)
-        except Exception as exc:
-            store.record_failure(key)
-            result.failed += 1
-            log.warning("meeting %s failed: %s", key, exc)
+        await process_meeting(cfg, store, meeting, result)
 
     if not cfg.dry_run:
         if result.uploaded > 0:
@@ -202,6 +211,34 @@ async def _run_once_graph(cfg: Config, store: StateStore, meetings: list[Meeting
         except Exception as exc:
             log.warning("workspace push failed (resolve on the repo or via /agent/workspace/pull): %s", exc)
         pull_vault(cfg)
+    return result
+
+
+async def process_event_meeting(cfg: Config, meeting: Meeting) -> PassResult:
+    """Process one meeting delivered by a meeting.completed webhook, outside the poll loop.
+
+    mark_low_transcript=False: the event can fire before Vexa's last transcript flush, so a
+    below-minimum transcript is left for the next poll instead of being permanently skipped.
+    In graph mode this also runs the same best-effort post-steps as a pass that uploaded
+    something (trigger_routine_now, push_if_ahead, pull_vault); note mode has nothing else to
+    do once process_meeting returns.
+    """
+    store = StateStore(cfg.state_dir / "state.json")
+    result = PassResult()
+    await process_meeting(cfg, store, meeting, result, mark_low_transcript=False)
+
+    if cfg.bridge_mode == "graph" and not cfg.dry_run:
+        if result.uploaded > 0:
+            try:
+                await trigger_routine_now(cfg)
+            except Exception as exc:
+                log.warning("immediate routine run failed (the cron picks it up): %s", exc)
+        try:
+            await push_if_ahead(cfg)
+        except Exception as exc:
+            log.warning("workspace push failed (resolve on the repo or via /agent/workspace/pull): %s", exc)
+        pull_vault(cfg)
+
     return result
 
 

@@ -548,3 +548,94 @@ async def test_graph_mode_push_transport_error_is_logged_not_raised(tmp_path, mo
         result = await m.run_once(_graph_cfg(tmp_path))
     assert result.failed == 0
     assert "push" in caplog.text
+
+
+# --- process_event_meeting (webhook path) -------------------------------
+
+
+async def test_process_event_meeting_note_mode_marks_done(tmp_path, monkeypatch):
+    created = []
+
+    async def create_note(cfg, path, content):
+        created.append((path, content))
+
+    _patch_clients(monkeypatch, [], create_note_fn=create_note)
+    result = await m.process_event_meeting(_cfg(tmp_path), _meeting())
+    assert result.summarized == 1
+    assert len(created) == 1
+    from summarizer.state import StateStore
+
+    assert StateStore(tmp_path / "state.json").is_done(7) is True
+
+
+async def test_process_event_meeting_low_transcript_leaves_meeting_for_poll(tmp_path, monkeypatch):
+    """A webhook can fire before the last transcript flush; a below-minimum transcript must not
+    be permanently marked skipped, so the next poll pass still picks the meeting up."""
+    _patch_clients(monkeypatch, [], utts=[Utterance("David", 0.0, 5.0, "hi")])
+    result = await m.process_event_meeting(_cfg(tmp_path, min_sec=30.0), _meeting())
+    assert result.skipped == 1
+    from summarizer.state import StateStore
+
+    store = StateStore(tmp_path / "state.json")
+    assert store.get(7) is None
+    assert store.is_done(7) is False
+
+
+async def test_process_event_meeting_idle_when_already_done(tmp_path, monkeypatch):
+    _patch_clients(monkeypatch, [_meeting()])
+    cfg = _cfg(tmp_path)
+    await m.run_once(cfg)  # the poll gets there first
+    result = await m.process_event_meeting(cfg, _meeting())
+    assert result.idle == 1
+
+
+async def test_process_event_meeting_graph_mode_uploads_triggers_pushes_and_pulls(tmp_path, monkeypatch):
+    order = []
+
+    async def upload(cfg, filename, content):
+        return "uploads/x"
+
+    async def trigger(cfg):
+        order.append("trigger")
+
+    async def push(cfg):
+        order.append("push")
+        return True
+
+    def pull(cfg):
+        order.append("pull")
+        return True
+
+    _patch_graph(monkeypatch, [], upload_fn=upload, trigger_fn=trigger, push_fn=push, pull_fn=pull)
+    cfg = _graph_cfg(tmp_path, vault=True)
+    result = await m.process_event_meeting(cfg, _meeting())
+    assert result.uploaded == 1
+    assert order == ["trigger", "push", "pull"]
+    from summarizer.state import StateStore
+
+    assert StateStore(tmp_path / "state.json").is_done(7) is True
+
+
+async def test_process_event_meeting_graph_mode_dry_run_skips_post_steps(tmp_path, monkeypatch):
+    triggered = []
+
+    async def trigger(cfg):
+        triggered.append(1)
+
+    _patch_graph(monkeypatch, [], trigger_fn=trigger)
+    result = await m.process_event_meeting(_graph_cfg(tmp_path, dry_run=True), _meeting())
+    assert result.uploaded == 1
+    assert triggered == []
+
+
+async def test_process_event_meeting_graph_mode_no_trigger_when_nothing_uploaded(tmp_path, monkeypatch):
+    triggered = []
+
+    async def trigger(cfg):
+        triggered.append(1)
+
+    _patch_graph(monkeypatch, [], utts=[Utterance("David", 0.0, 5.0, "hi")], trigger_fn=trigger)
+    result = await m.process_event_meeting(_graph_cfg(tmp_path), _meeting())
+    assert result.uploaded == 0
+    assert result.skipped == 1
+    assert triggered == []
