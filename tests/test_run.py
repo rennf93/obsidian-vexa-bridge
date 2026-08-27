@@ -254,7 +254,16 @@ def _graph_cfg(tmp_path, dry_run=False, vault=False):
 
 
 def _patch_graph(
-    monkeypatch, meetings, utts=None, upload_fn=None, ensure_fn=None, push_fn=None, pull_fn=None, trigger_fn=None
+    monkeypatch,
+    meetings,
+    utts=None,
+    upload_fn=None,
+    ensure_fn=None,
+    push_fn=None,
+    pull_fn=None,
+    trigger_fn=None,
+    head_fn=None,
+    wait_fn=None,
 ):
     async def fake_list(cfg, platforms):
         return meetings
@@ -287,6 +296,16 @@ def _patch_graph(
             return await trigger_fn(cfg)
         return None
 
+    async def fake_head(cfg):
+        if head_fn is not None:
+            return await head_fn(cfg)
+        return "abc"
+
+    async def fake_wait(cfg, base, *, timeout_seconds, interval_seconds=15.0, sleep=None):
+        if wait_fn is not None:
+            return await wait_fn(cfg, base)
+        return True
+
     async def must_not_summarize(*a, **k):
         raise AssertionError("graph mode must not call the LLM")
 
@@ -297,6 +316,8 @@ def _patch_graph(
     monkeypatch.setattr(m, "push_if_ahead", fake_push)
     monkeypatch.setattr(m, "pull_vault", fake_pull)
     monkeypatch.setattr(m, "trigger_routine_now", fake_trigger)
+    monkeypatch.setattr(m, "git_head", fake_head)
+    monkeypatch.setattr(m, "wait_for_commit", fake_wait)
     monkeypatch.setattr(m, "summarize", must_not_summarize)
     monkeypatch.setattr(m, "_routine_ready", False)
 
@@ -598,6 +619,10 @@ async def test_process_event_meeting_graph_mode_uploads_triggers_pushes_and_pull
     async def trigger(cfg):
         order.append("trigger")
 
+    async def wait(cfg, base):
+        order.append("wait")
+        return True
+
     async def push(cfg):
         order.append("push")
         return True
@@ -606,14 +631,109 @@ async def test_process_event_meeting_graph_mode_uploads_triggers_pushes_and_pull
         order.append("pull")
         return True
 
-    _patch_graph(monkeypatch, [], upload_fn=upload, trigger_fn=trigger, push_fn=push, pull_fn=pull)
+    _patch_graph(monkeypatch, [], upload_fn=upload, trigger_fn=trigger, wait_fn=wait, push_fn=push, pull_fn=pull)
     cfg = _graph_cfg(tmp_path, vault=True)
     result = await m.process_event_meeting(cfg, _meeting())
     assert result.uploaded == 1
-    assert order == ["trigger", "push", "pull"]
+    assert order == ["trigger", "wait", "push", "pull"]
     from summarizer.state import StateStore
 
     assert StateStore(tmp_path / "state.json").is_done(7) is True
+
+
+async def test_process_event_meeting_wait_timeout_still_pushes_once_and_warns(tmp_path, monkeypatch, caplog):
+    order = []
+
+    async def upload(cfg, filename, content):
+        return "uploads/x"
+
+    async def trigger(cfg):
+        order.append("trigger")
+
+    async def wait(cfg, base):
+        order.append("wait")
+        return False
+
+    async def push(cfg):
+        order.append("push")
+        return True
+
+    def pull(cfg):
+        order.append("pull")
+        return True
+
+    _patch_graph(monkeypatch, [], upload_fn=upload, trigger_fn=trigger, wait_fn=wait, push_fn=push, pull_fn=pull)
+    cfg = _graph_cfg(tmp_path, vault=True)
+    with caplog.at_level("WARNING", logger="vexa-summarizer"):
+        result = await m.process_event_meeting(cfg, _meeting())
+    assert result.uploaded == 1
+    assert order == ["trigger", "wait", "push", "pull"]  # push still attempted once, even on timeout
+    assert "commit not seen" in caplog.text
+
+
+async def test_process_event_meeting_wait_not_called_when_nothing_uploaded(tmp_path, monkeypatch):
+    waited = []
+
+    async def wait(cfg, base):
+        waited.append(1)
+        return True
+
+    _patch_graph(monkeypatch, [], utts=[Utterance("David", 0.0, 5.0, "hi")], wait_fn=wait)
+    result = await m.process_event_meeting(_graph_cfg(tmp_path), _meeting())
+    assert result.uploaded == 0
+    assert waited == []
+
+
+async def test_process_event_meeting_wait_not_called_on_dry_run(tmp_path, monkeypatch):
+    waited = []
+
+    async def wait(cfg, base):
+        waited.append(1)
+        return True
+
+    _patch_graph(monkeypatch, [], wait_fn=wait)
+    result = await m.process_event_meeting(_graph_cfg(tmp_path, dry_run=True), _meeting())
+    assert result.uploaded == 1
+    assert waited == []
+
+
+async def test_process_event_meeting_passes_base_sha_and_cfg_timeouts_to_wait(tmp_path, monkeypatch):
+    captured = {}
+
+    async def head(cfg):
+        return "base-sha"
+
+    async def fake_wait(cfg, base, *, timeout_seconds, interval_seconds, sleep=None):
+        captured["base"] = base
+        captured["timeout"] = timeout_seconds
+        captured["interval"] = interval_seconds
+        return True
+
+    _patch_graph(monkeypatch, [], head_fn=head)
+    monkeypatch.setattr(m, "wait_for_commit", fake_wait)
+    cfg = _graph_cfg(tmp_path)
+    cfg.webhook_commit_wait_seconds = 42.0
+    cfg.webhook_commit_poll_seconds = 3.0
+    await m.process_event_meeting(cfg, _meeting())
+    assert captured == {"base": "base-sha", "timeout": 42.0, "interval": 3.0}
+
+
+async def test_process_event_meeting_git_head_error_before_trigger_is_best_effort(tmp_path, monkeypatch, caplog):
+    captured = {}
+
+    async def head(cfg):
+        raise RuntimeError("gateway down")
+
+    async def fake_wait(cfg, base, *, timeout_seconds, interval_seconds, sleep=None):
+        captured["base"] = base
+        return True
+
+    _patch_graph(monkeypatch, [], head_fn=head)
+    monkeypatch.setattr(m, "wait_for_commit", fake_wait)
+    with caplog.at_level("WARNING", logger="vexa-summarizer"):
+        result = await m.process_event_meeting(_graph_cfg(tmp_path), _meeting())
+    assert result.uploaded == 1
+    assert captured["base"] is None
 
 
 async def test_process_event_meeting_graph_mode_dry_run_skips_post_steps(tmp_path, monkeypatch):

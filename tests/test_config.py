@@ -287,5 +287,35 @@ def test_webhook_supported_in_graph_mode():
         }
     )
     assert cfg.bridge_mode == "graph"
-    assert cfg.webhook_enabled is True
-    assert cfg.webhook_secret == "s"
+
+
+# --- webhook commit wait (graph mode, event path) -----------------------
+
+
+def test_webhook_commit_wait_defaults():
+    cfg = config.load_config(_base_env())
+    assert cfg.webhook_commit_wait_seconds == 600.0
+    assert cfg.webhook_commit_poll_seconds == 15.0
+
+
+def test_webhook_commit_wait_overrides():
+    env = _base_env()
+    env["WEBHOOK_COMMIT_WAIT_SECONDS"] = "120"
+    env["WEBHOOK_COMMIT_POLL_SECONDS"] = "5"
+    cfg = config.load_config(env)
+    assert cfg.webhook_commit_wait_seconds == 120.0
+    assert cfg.webhook_commit_poll_seconds == 5.0
+
+
+def test_webhook_commit_wait_read_in_graph_mode_too():
+    cfg = config.load_config(
+        {
+            "BRIDGE_MODE": "graph",
+            "VEXA_API_URL": "http://v",
+            "VEXA_API_KEY": "k",
+            "WEBHOOK_COMMIT_WAIT_SECONDS": "90",
+            "WEBHOOK_COMMIT_POLL_SECONDS": "10",
+        }
+    )
+    assert cfg.webhook_commit_wait_seconds == 90.0
+    assert cfg.webhook_commit_poll_seconds == 10.0

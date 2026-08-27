@@ -1,4 +1,4 @@
-"""Client for the six Vexa Agent API routes graph mode needs, via the gateway's /agent/* proxy.
+"""Client for the seven Vexa Agent API routes graph mode needs, via the gateway's /agent/* proxy.
 
 Routes (Vexa 0.12.x, self-hosted compose only; hosted and Kubernetes answer 502 on /agent/*):
   POST   /agent/workspace/upload            multipart field "files" -> {"files": [{name, path}]}
@@ -8,6 +8,7 @@ Routes (Vexa 0.12.x, self-hosted compose only; hosted and Kubernetes answer 502 
   DELETE /agent/routines/{routine_id}       -> 200/204; 404 if the routine is already gone
   GET    /agent/workspace/git-remote-status -> {tracked, ahead, behind, remote, branch, ...}
   POST   /agent/workspace/push              {} -> uses the saved token; 400 none saved; 502 diverged
+  GET    /agent/workspace/git              -> {branch, changes, commits: [{sha, msg, when, files}, ...]}
 
 Vexa derives a routine's id from (subject, name, cron), so changing GRAPH_ROUTINE_CRON makes a
 different id, not an update to the old one; summarizer.graph.ensure_routine deletes the stale
@@ -85,6 +86,19 @@ async def push(cfg: Config) -> dict[str, Any]:
     status, data = await _http_post_json(f"{cfg.vexa_api_url}/agent/workspace/push", _headers(cfg), {})
     _check(status, data, "POST /agent/workspace/push")
     return data if isinstance(data, dict) else {}
+
+
+async def git_head(cfg: Config) -> str | None:
+    """The workspace's current commit sha (data["commits"][0]["sha"]), or None when there are no
+    commits yet or the response shape is unexpected. Used by summarizer.graph.wait_for_commit to
+    detect the agent's commit landing on the event path."""
+    status, data = await _http_get_json(f"{cfg.vexa_api_url}/agent/workspace/git", _headers(cfg))
+    _check(status, data, "GET /agent/workspace/git")
+    commits = data.get("commits") if isinstance(data, dict) else None
+    if not isinstance(commits, list) or not commits or not isinstance(commits[0], dict):
+        return None
+    sha = commits[0].get("sha")
+    return str(sha) if sha is not None else None
 
 
 async def _http_get_json(url: str, headers: dict[str, str]) -> tuple[int, Any]:

@@ -142,3 +142,54 @@ async def test_delete_routine_hits_documented_route_and_maps_404(monkeypatch):
         await agent_api.delete_routine(_cfg(), "rt_old")
     assert exc.value.status == 404
     assert seen == ["http://vexa:8056/agent/routines/rt_old"]
+
+
+async def test_git_head_hits_documented_route_and_returns_first_commit_sha(monkeypatch):
+    seen = []
+
+    async def fake_get(url, headers):
+        seen.append(url)
+        return 200, {
+            "branch": "main",
+            "changes": [],
+            "commits": [
+                {"sha": "3cc8227", "msg": "fold meeting", "when": "2026-08-27T00:00:00Z", "files": ["kg/x.md"]},
+                {"sha": "1a2b3c4", "msg": "older", "when": "2026-08-26T00:00:00Z", "files": []},
+            ],
+        }
+
+    monkeypatch.setattr(agent_api, "_http_get_json", fake_get)
+    assert await agent_api.git_head(_cfg()) == "3cc8227"
+    assert seen == ["http://vexa:8056/agent/workspace/git"]
+
+
+async def test_git_head_returns_none_when_no_commits(monkeypatch):
+    async def fake_get(url, headers):
+        return 200, {"branch": "main", "changes": [], "commits": []}
+
+    monkeypatch.setattr(agent_api, "_http_get_json", fake_get)
+    assert await agent_api.git_head(_cfg()) is None
+
+
+async def test_git_head_returns_none_on_unexpected_shape(monkeypatch):
+    async def fake_get(url, headers):
+        return 200, {"branch": "main"}
+
+    monkeypatch.setattr(agent_api, "_http_get_json", fake_get)
+    assert await agent_api.git_head(_cfg()) is None
+
+    async def fake_get_list(url, headers):
+        return 200, ["not", "a", "dict"]
+
+    monkeypatch.setattr(agent_api, "_http_get_json", fake_get_list)
+    assert await agent_api.git_head(_cfg()) is None
+
+
+async def test_git_head_non_2xx_raises_with_status(monkeypatch):
+    async def fake_get(url, headers):
+        return 502, {"detail": "unreachable"}
+
+    monkeypatch.setattr(agent_api, "_http_get_json", fake_get)
+    with pytest.raises(agent_api.AgentApiError) as exc:
+        await agent_api.git_head(_cfg())
+    assert exc.value.status == 502

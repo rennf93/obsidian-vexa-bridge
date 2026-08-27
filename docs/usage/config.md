@@ -62,6 +62,8 @@ An event-driven alternative to the poll, supported by both `BRIDGE_MODE=note` an
 | `WEBHOOK_PATH` | never | `/webhook` | Route the receiver listens on. |
 | `WEBHOOK_PUBLIC_URL` | never | - | When set, the bridge registers this URL with Vexa (`PUT /user/webhook`) at startup. |
 | `WEBHOOK_DELAY_SECONDS` | never | `20` | Wait this long after the event before fetching the transcript, since Vexa's completed transition can precede the last transcript flush. |
+| `WEBHOOK_COMMIT_WAIT_SECONDS` | never | `600` | `BRIDGE_MODE=graph` only. On the event path, after triggering the fold, wait up to this long for the agent's commit to land so the push that follows picks it up right away. On timeout the bridge still pushes once (harmless if nothing is ahead) and the next poll pass covers the rest. |
+| `WEBHOOK_COMMIT_POLL_SECONDS` | never | `15` | `BRIDGE_MODE=graph` only. Interval between checks while waiting for the agent's commit. |
 
 ## Behavior knobs
 

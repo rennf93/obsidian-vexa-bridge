@@ -37,6 +37,8 @@ DEFAULT_WEBHOOK_HOST = "0.0.0.0"  # nosec B104 - container-network bind-all, sam
 DEFAULT_WEBHOOK_PORT = 8080
 DEFAULT_WEBHOOK_PATH = "/webhook"
 DEFAULT_WEBHOOK_DELAY_SECONDS = 20.0
+DEFAULT_WEBHOOK_COMMIT_WAIT_SECONDS = 600.0
+DEFAULT_WEBHOOK_COMMIT_POLL_SECONDS = 15.0
 
 
 class ConfigError(ValueError):
@@ -76,6 +78,8 @@ class Config:
     webhook_secret: str | None = None
     webhook_public_url: str | None = None
     webhook_delay_seconds: float = DEFAULT_WEBHOOK_DELAY_SECONDS
+    webhook_commit_wait_seconds: float = DEFAULT_WEBHOOK_COMMIT_WAIT_SECONDS
+    webhook_commit_poll_seconds: float = DEFAULT_WEBHOOK_COMMIT_POLL_SECONDS
 
 
 def _bool(val: str | None) -> bool:
@@ -126,6 +130,14 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
     cfg.webhook_path = env.get("WEBHOOK_PATH", DEFAULT_WEBHOOK_PATH).strip() or DEFAULT_WEBHOOK_PATH
     cfg.webhook_public_url = (env.get("WEBHOOK_PUBLIC_URL") or "").strip() or None
     cfg.webhook_delay_seconds = float(env.get("WEBHOOK_DELAY_SECONDS", str(DEFAULT_WEBHOOK_DELAY_SECONDS)))
+    # Event-path only (graph mode): how long to wait for the agent's commit before pushing anyway.
+    # Read in both modes (like the rest of this block) even though note mode never consults it.
+    cfg.webhook_commit_wait_seconds = float(
+        env.get("WEBHOOK_COMMIT_WAIT_SECONDS", str(DEFAULT_WEBHOOK_COMMIT_WAIT_SECONDS))
+    )
+    cfg.webhook_commit_poll_seconds = float(
+        env.get("WEBHOOK_COMMIT_POLL_SECONDS", str(DEFAULT_WEBHOOK_COMMIT_POLL_SECONDS))
+    )
     if cfg.webhook_enabled:
         cfg.webhook_secret = _req(env, "WEBHOOK_SECRET")
     else:
