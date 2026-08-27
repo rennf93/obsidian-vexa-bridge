@@ -216,17 +216,31 @@ async def _loop(cfg: Config) -> None:
     log.info("received SIGTERM; exiting")
 
 
-def _once_flag(argv: list[str]) -> bool:
+def _parse(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="summarizer", description="Vexa -> Obsidian sink adapter")
     parser.add_argument("--once", action="store_true", help="run a single pass and exit")
-    args = parser.parse_args(argv)
-    env_once = os.getenv("ONCE", "").strip().lower() in {"1", "true", "yes"}
-    return bool(args.once or env_once)
+    sub = parser.add_subparsers(dest="command")
+    init = sub.add_parser("init-workspace", help="write the knowledge-workspace template into a local repo clone")
+    init.add_argument("target", help="path to your local clone of the workspace repo")
+    init.add_argument("--repo-url", required=True, help="HTTPS URL of that repo (what Vexa will clone)")
+    init.add_argument("--api-base", default=os.getenv("VEXA_API_URL", "http://localhost:18056"))
+    return parser.parse_args(argv)
 
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
-    once = _once_flag(sys.argv[1:])
+    args = _parse(sys.argv[1:])
+    if args.command == "init-workspace":
+        from pathlib import Path
+
+        from summarizer.workspace import init_workspace, setup_instructions
+
+        written = init_workspace(Path(args.target))
+        for p in written:
+            print(f"wrote {p}")
+        print(setup_instructions(args.api_base, args.repo_url))
+        return 0
+    once = bool(args.once or os.getenv("ONCE", "").strip().lower() in {"1", "true", "yes"})
     try:
         cfg = _config_mod.load_config()
     except ConfigError as exc:
