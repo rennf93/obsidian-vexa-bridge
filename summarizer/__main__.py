@@ -30,7 +30,7 @@ import sys
 from dataclasses import dataclass
 
 from summarizer import config as _config_mod
-from summarizer.agent_api import AgentApiError, upload
+from summarizer.agent_api import upload
 from summarizer.config import Config, ConfigError
 from summarizer.graph import ensure_routine, pull_vault, push_if_ahead, render_transcript, transcript_filename
 from summarizer.llm import summarize  # async; litellm lazy-imported inside
@@ -138,7 +138,7 @@ async def _run_once_graph(cfg: Config, store: StateStore, meetings: list[Meeting
     result = PassResult()
     try:
         await ensure_routine(cfg)
-    except AgentApiError as exc:
+    except Exception as exc:
         log.warning("routine check failed (uploads continue; create the routine later): %s", exc)
 
     for meeting in meetings:
@@ -173,7 +173,7 @@ async def _run_once_graph(cfg: Config, store: StateStore, meetings: list[Meeting
     if not cfg.dry_run:
         try:
             await push_if_ahead(cfg)
-        except AgentApiError as exc:
+        except Exception as exc:
             log.warning("workspace push failed (resolve on the repo or via /agent/workspace/pull): %s", exc)
         pull_vault(cfg)
     return result

@@ -403,11 +403,33 @@ async def test_graph_mode_routine_501_is_logged_and_uploads_continue(tmp_path, m
     assert "routine" in caplog.text
 
 
+async def test_graph_mode_routine_transport_error_is_logged_and_uploads_continue(tmp_path, monkeypatch, caplog):
+    async def ensure(cfg):
+        raise RuntimeError("connection refused")
+
+    _patch_graph(monkeypatch, [_meeting()], ensure_fn=ensure)
+    with caplog.at_level("WARNING", logger="vexa-summarizer"):
+        result = await m.run_once(_graph_cfg(tmp_path))
+    assert result.uploaded == 1
+    assert "routine" in caplog.text
+
+
 async def test_graph_mode_push_error_is_logged_not_raised(tmp_path, monkeypatch, caplog):
     from summarizer.agent_api import AgentApiError
 
     async def push(cfg):
         raise AgentApiError("POST /agent/workspace/push -> HTTP 502: diverged", 502)
+
+    _patch_graph(monkeypatch, [], push_fn=push)
+    with caplog.at_level("WARNING", logger="vexa-summarizer"):
+        result = await m.run_once(_graph_cfg(tmp_path))
+    assert result.failed == 0
+    assert "push" in caplog.text
+
+
+async def test_graph_mode_push_transport_error_is_logged_not_raised(tmp_path, monkeypatch, caplog):
+    async def push(cfg):
+        raise RuntimeError("timeout")
 
     _patch_graph(monkeypatch, [], push_fn=push)
     with caplog.at_level("WARNING", logger="vexa-summarizer"):
