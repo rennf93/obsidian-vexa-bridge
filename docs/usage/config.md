@@ -25,7 +25,7 @@ These vars only matter when `BRIDGE_MODE=graph`. In graph mode `AI_*`, `OBSIDIAN
 |---|---|---|---|
 | `VEXA_VAULT_FOLDER` | never | `Vexa` | Name of the fast-forward mirror folder under `VAULT_DIR` that the bridge pulls after each pass. |
 | `GRAPH_ROUTINE_NAME` | never | `meeting-to-graph` | Name of the standing Vexa routine that folds `uploads/` into the knowledge graph. Created on the bridge's first pass if a routine with that name doesn't already exist. |
-| `GRAPH_ROUTINE_CRON` | never | `0 * * * *` | Cron schedule for that routine. The bridge triggers an immediate run right after it uploads a transcript, so this cron is the safety net, not the primary path. |
+| `GRAPH_ROUTINE_CRON` | never | `0 * * * *` | Cron schedule for that routine. The bridge triggers an immediate run right after it uploads a transcript, so this cron is the safety net, not the primary path. Changing it retires the routine created under the old cron on the bridge's next start (Vexa keys a routine by name and cron together, so a cron change alone would otherwise leave both running). |
 
 ## Obsidian sink
 

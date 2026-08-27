@@ -60,10 +60,10 @@ async def test_upload_non_2xx_raises_with_status(monkeypatch):
 async def test_list_routines_reads_routines_key_or_list(monkeypatch):
     async def fake_get(url, headers):
         assert url == "http://vexa:8056/agent/routines"
-        return 200, {"routines": [{"name": "meeting-to-graph", "cron": "*/15 * * * *"}]}
+        return 200, {"routines": [{"name": "meeting-to-graph", "cron": "*/5 * * * *"}]}
 
     monkeypatch.setattr(agent_api, "_http_get_json", fake_get)
-    assert await agent_api.list_routines(_cfg()) == [{"name": "meeting-to-graph", "cron": "*/15 * * * *"}]
+    assert await agent_api.list_routines(_cfg()) == [{"name": "meeting-to-graph", "cron": "*/5 * * * *"}]
 
     async def fake_get_list(url, headers):
         return 200, [{"name": "x"}]
@@ -80,11 +80,11 @@ async def test_create_routine_posts_documented_body(monkeypatch):
         return 201, {"routine": {"name": body["name"]}, "job_id": "job_1", "ran_now": body["run_now"]}
 
     monkeypatch.setattr(agent_api, "_http_post_json", fake_post)
-    out = await agent_api.create_routine(_cfg(), "meeting-to-graph", "*/15 * * * *", "do it", run_now=False)
+    out = await agent_api.create_routine(_cfg(), "meeting-to-graph", "*/5 * * * *", "do it", run_now=False)
     assert out["job_id"] == "job_1"
     url, body = calls[0]
     assert url == "http://vexa:8056/agent/routines"
-    assert body == {"name": "meeting-to-graph", "cron": "*/15 * * * *", "prompt": "do it", "run_now": False}
+    assert body == {"name": "meeting-to-graph", "cron": "*/5 * * * *", "prompt": "do it", "run_now": False}
 
 
 async def test_create_routine_501_maps_to_error_with_status(monkeypatch):
@@ -128,3 +128,17 @@ async def test_push_502_is_an_error_with_status(monkeypatch):
     with pytest.raises(agent_api.AgentApiError) as exc:
         await agent_api.push(_cfg())
     assert exc.value.status == 502
+
+
+async def test_delete_routine_hits_documented_route_and_maps_404(monkeypatch):
+    seen = []
+
+    async def fake_delete(url, headers):
+        seen.append(url)
+        return 404, {"detail": "not found"}
+
+    monkeypatch.setattr(agent_api, "_http_delete_json", fake_delete)
+    with pytest.raises(agent_api.AgentApiError) as exc:
+        await agent_api.delete_routine(_cfg(), "rt_old")
+    assert exc.value.status == 404
+    assert seen == ["http://vexa:8056/agent/routines/rt_old"]

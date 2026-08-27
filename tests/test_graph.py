@@ -72,12 +72,53 @@ async def test_ensure_routine_creates_when_missing(monkeypatch):
 
 async def test_ensure_routine_is_a_noop_when_present(monkeypatch):
     async def fake_list(cfg):
-        return [{"name": "meeting-to-graph", "cron": "*/15 * * * *"}]
+        return [{"name": "meeting-to-graph", "cron": "*/5 * * * *"}]
 
     async def fake_create(cfg, name, cron, prompt, run_now=False):
         raise AssertionError("must not create a duplicate")
 
     monkeypatch.setattr(agent_api, "list_routines", fake_list)
+    monkeypatch.setattr(agent_api, "create_routine", fake_create)
+    cfg = _cfg()
+    cfg.graph_routine_cron = "*/5 * * * *"
+    assert await graph.ensure_routine(cfg) is True
+
+
+async def test_ensure_routine_replaces_routine_with_stale_cron(monkeypatch):
+    calls = []
+
+    async def fake_list(cfg):
+        return [{"id": "rt_old", "name": "meeting-to-graph", "cron": "*/15 * * * *"}]
+
+    async def fake_delete(cfg, routine_id):
+        calls.append(("delete", routine_id))
+
+    async def fake_create(cfg, name, cron, prompt, run_now=False):
+        calls.append(("create", name, cron, prompt, run_now))
+        return {"job_id": "job_2"}
+
+    monkeypatch.setattr(agent_api, "list_routines", fake_list)
+    monkeypatch.setattr(agent_api, "delete_routine", fake_delete)
+    monkeypatch.setattr(agent_api, "create_routine", fake_create)
+    assert await graph.ensure_routine(_cfg()) is True
+    assert calls == [
+        ("delete", "rt_old"),
+        ("create", "meeting-to-graph", "0 * * * *", graph.ROUTINE_PROMPT, False),
+    ]
+
+
+async def test_ensure_routine_keeps_matching_cron(monkeypatch):
+    async def fake_list(cfg):
+        return [{"id": "rt_1", "name": "meeting-to-graph", "cron": "0 * * * *"}]
+
+    async def fake_delete(cfg, routine_id):
+        raise AssertionError("must not delete when cron matches")
+
+    async def fake_create(cfg, name, cron, prompt, run_now=False):
+        raise AssertionError("must not create when cron matches")
+
+    monkeypatch.setattr(agent_api, "list_routines", fake_list)
+    monkeypatch.setattr(agent_api, "delete_routine", fake_delete)
     monkeypatch.setattr(agent_api, "create_routine", fake_create)
     assert await graph.ensure_routine(_cfg()) is True
 
