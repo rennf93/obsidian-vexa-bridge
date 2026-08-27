@@ -156,3 +156,14 @@ def test_pull_vault_reports_non_ff_failure_without_raising(tmp_path, caplog):
     with caplog.at_level("ERROR", logger="vexa-summarizer"):
         assert graph.pull_vault(_cfg(tmp_path), run=fake_run) is False
     assert "fast-forward" in caplog.text
+
+
+def test_pull_vault_reports_missing_git_without_raising(tmp_path, caplog):
+    (tmp_path / "Vexa" / ".git").mkdir(parents=True)
+
+    def fake_run(cmd, **kwargs):
+        raise FileNotFoundError("git")
+
+    with caplog.at_level("ERROR", logger="vexa-summarizer"):
+        assert graph.pull_vault(_cfg(tmp_path), run=fake_run) is False
+    assert "git" in caplog.text

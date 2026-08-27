@@ -95,7 +95,11 @@ def pull_vault(cfg: Config, run: Callable[..., subprocess.CompletedProcess[str]]
     if not (folder / ".git").exists():
         log.warning("VAULT_DIR set but %s is not a git checkout; skipping pull", folder)
         return False
-    proc = run(["git", "-C", str(folder), "pull", "--ff-only"], capture_output=True, text=True, check=False)
+    try:
+        proc = run(["git", "-C", str(folder), "pull", "--ff-only"], capture_output=True, text=True, check=False)
+    except OSError as exc:
+        log.error("vault pull failed in %s: could not run git: %s", folder, exc)
+        return False
     if proc.returncode != 0:
         log.error(
             "vault pull failed in %s (the folder must stay a fast-forward mirror; do not edit it locally): %s",
