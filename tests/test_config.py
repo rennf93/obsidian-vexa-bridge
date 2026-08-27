@@ -287,6 +287,8 @@ def test_webhook_supported_in_graph_mode():
         }
     )
     assert cfg.bridge_mode == "graph"
+    assert cfg.webhook_enabled is True
+    assert cfg.webhook_secret == "s"
 
 
 # --- webhook commit wait (graph mode, event path) -----------------------

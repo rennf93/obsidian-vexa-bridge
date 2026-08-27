@@ -7,6 +7,7 @@ monkeypatched so no aiohttp/litellm/Vexa dependency is needed.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sys
 
 import pytest
@@ -187,3 +188,68 @@ def test_loop_skips_registration_when_no_public_url(monkeypatch):
             await task
 
     asyncio.run(driver())
+
+
+# --- _drain_event_tasks / shutdown draining ------------------------------
+
+
+async def test_drain_event_tasks_warns_when_a_task_is_still_running(caplog):
+    task = asyncio.create_task(asyncio.sleep(10))
+    try:
+        with caplog.at_level("WARNING", logger="vexa-summarizer"):
+            await m._drain_event_tasks({task}, timeout=0.05)
+        assert "1 webhook event task" in caplog.text
+        assert "still running" in caplog.text
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+async def test_drain_event_tasks_no_warning_when_task_finishes_in_time(caplog):
+    task = asyncio.create_task(asyncio.sleep(0))
+    with caplog.at_level("WARNING", logger="vexa-summarizer"):
+        await m._drain_event_tasks({task}, timeout=1.0)
+    assert "still running" not in caplog.text
+
+
+async def test_drain_event_tasks_noop_on_empty_set():
+    await m._drain_event_tasks(set(), timeout=1.0)  # must not raise or hang
+
+
+def test_loop_drains_pending_event_tasks_on_shutdown(monkeypatch):
+    cfg = config.Config(
+        summarize_enabled=True,
+        vexa_api_url="http://vexa:8056",
+        vexa_api_key="k",
+        obsidian_enabled=False,
+        poll_interval_seconds=180,
+        webhook_enabled=True,
+        webhook_secret="s",
+    )
+
+    calls = {"n": 0}
+
+    async def fake_run_once(_cfg):
+        return PassResult()
+
+    async def fake_serve(_cfg, _handler):
+        await asyncio.Event().wait()
+
+    def fake_pending():
+        calls["n"] += 1
+        return set()
+
+    monkeypatch.setattr(m, "run_once", fake_run_once)
+    monkeypatch.setattr(m, "serve", fake_serve)
+    monkeypatch.setattr(m, "pending_event_tasks", fake_pending)
+
+    async def driver():
+        task = asyncio.create_task(m._loop(cfg))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(driver())
+    assert calls["n"] == 1

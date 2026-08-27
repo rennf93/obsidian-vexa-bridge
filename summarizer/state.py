@@ -11,7 +11,9 @@ crash-recovery backstop (see obsidian.create_note).
 
 from __future__ import annotations
 
+import fcntl
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -29,6 +31,7 @@ class MeetingState:
 class StateStore:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
+        self.lock_path = Path(str(self.path) + ".lock")
         self._data: dict[str, MeetingState] = self._load()
 
     def _load(self) -> dict[str, MeetingState]:
@@ -50,12 +53,29 @@ class StateStore:
                 )
         return out
 
-    def _save(self) -> None:
+    def _save(self, data: dict[str, MeetingState]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {mid: asdict(rec) for mid, rec in self._data.items()}
+        payload = {mid: asdict(rec) for mid, rec in data.items()}
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, indent=2))
         tmp.replace(self.path)  # atomic on POSIX
+
+    def _mutate(self, apply: Callable[[dict[str, MeetingState]], None]) -> None:
+        """Read-modify-write under an exclusive file lock, so two StateStore instances (two
+        concurrent process_event_meeting tasks, or an event task racing the poll loop) can't
+        clobber each other's records by both saving from a stale in-memory copy. Reloads the
+        file fresh under the lock, applies only this call's change, atomic-writes, then refreshes
+        this instance's cache so its own next mutation starts from the merged state too."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.lock_path, "w") as lockfile:
+            fcntl.flock(lockfile.fileno(), fcntl.LOCK_EX)
+            try:
+                fresh = self._load()
+                apply(fresh)
+                self._save(fresh)
+                self._data = fresh
+            finally:
+                fcntl.flock(lockfile.fileno(), fcntl.LOCK_UN)
 
     def get(self, meeting_id: int | str) -> MeetingState | None:
         return self._data.get(str(meeting_id))
@@ -69,35 +89,36 @@ class StateStore:
         return rec is not None and rec.status == "failed"
 
     def mark_done(self, meeting_id: int | str, note_path: str | None) -> None:
-        self._data[str(meeting_id)] = MeetingState(
-            note_path=note_path,
-            summarized_at=_now_iso(),
-            attempts=0,
-            status="done",
-        )
-        self._save()
+        key = str(meeting_id)
+
+        def apply(data: dict[str, MeetingState]) -> None:
+            data[key] = MeetingState(note_path=note_path, summarized_at=_now_iso(), attempts=0, status="done")
+
+        self._mutate(apply)
 
     def mark_skipped(self, meeting_id: int | str, reason: str) -> None:
         # ponytail: reason stored in note_path field to avoid a new schema field; skipped
         # meetings are not retried (is_done covers it). Promote to a real field if we ever
         # surface skip-reasons in a UI.
-        self._data[str(meeting_id)] = MeetingState(
-            note_path=None,
-            summarized_at=_now_iso(),
-            attempts=0,
-            status="skipped",
-        )
-        self._save()
+        key = str(meeting_id)
+
+        def apply(data: dict[str, MeetingState]) -> None:
+            data[key] = MeetingState(note_path=None, summarized_at=_now_iso(), attempts=0, status="skipped")
+
+        self._mutate(apply)
 
     def record_failure(self, meeting_id: int | str) -> None:
         key = str(meeting_id)
-        rec = self._data.get(key) or MeetingState()
-        rec.attempts += 1
-        if rec.attempts >= POISON_LIMIT:
-            rec.status = "failed"
-        rec.summarized_at = _now_iso()
-        self._data[key] = rec
-        self._save()
+
+        def apply(data: dict[str, MeetingState]) -> None:
+            rec = data.get(key) or MeetingState()
+            rec.attempts += 1
+            if rec.attempts >= POISON_LIMIT:
+                rec.status = "failed"
+            rec.summarized_at = _now_iso()
+            data[key] = rec
+
+        self._mutate(apply)
 
 
 def _now_iso() -> str:

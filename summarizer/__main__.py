@@ -55,7 +55,7 @@ from summarizer.obsidian import assemble_note, create_note, note_path, write_not
 from summarizer.state import StateStore
 from summarizer.types import Meeting, MeetingMeta, Utterance
 from summarizer.vexa import get_transcript, list_completed_meetings, write_notes
-from summarizer.webhook import register_with_vexa, serve
+from summarizer.webhook import pending_event_tasks, register_with_vexa, serve
 
 log = logging.getLogger("vexa-summarizer")
 
@@ -329,8 +329,21 @@ async def _loop(cfg: Config) -> None:
             server_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await server_task
+            await _drain_event_tasks(pending_event_tasks())
 
     log.info("received SIGTERM; exiting")
+
+
+async def _drain_event_tasks(tasks: set[asyncio.Task[None]], timeout: float = 10.0) -> None:
+    """Best-effort wait for in-flight webhook event tasks (a process_event_meeting run, possibly
+    still inside wait_for_commit or a push) before the process exits, so a SIGTERM mid-event
+    leaves a warning behind instead of silently dropping work. Never cancels anything; a task
+    still running after the timeout keeps running until the process actually dies."""
+    if not tasks:
+        return
+    _done, still_pending = await asyncio.wait(tasks, timeout=timeout)
+    if still_pending:
+        log.warning("%d webhook event task(s) still running at shutdown", len(still_pending))
 
 
 def _parse(argv: list[str]) -> argparse.Namespace:
