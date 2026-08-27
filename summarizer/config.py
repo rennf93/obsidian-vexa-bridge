@@ -33,6 +33,10 @@ BRIDGE_MODES = {"note", "graph"}
 DEFAULT_VAULT_FOLDER = "Vexa"
 DEFAULT_ROUTINE_NAME = "meeting-to-graph"
 DEFAULT_ROUTINE_CRON = "0 * * * *"
+DEFAULT_WEBHOOK_HOST = "0.0.0.0"  # nosec B104 - container-network bind-all, same posture as the app's own port
+DEFAULT_WEBHOOK_PORT = 8080
+DEFAULT_WEBHOOK_PATH = "/webhook"
+DEFAULT_WEBHOOK_DELAY_SECONDS = 20.0
 
 
 class ConfigError(ValueError):
@@ -65,6 +69,13 @@ class Config:
     vault_folder: str = DEFAULT_VAULT_FOLDER
     graph_routine_name: str = DEFAULT_ROUTINE_NAME
     graph_routine_cron: str = DEFAULT_ROUTINE_CRON
+    webhook_enabled: bool = False
+    webhook_host: str = DEFAULT_WEBHOOK_HOST
+    webhook_port: int = DEFAULT_WEBHOOK_PORT
+    webhook_path: str = DEFAULT_WEBHOOK_PATH
+    webhook_secret: str | None = None
+    webhook_public_url: str | None = None
+    webhook_delay_seconds: float = DEFAULT_WEBHOOK_DELAY_SECONDS
 
 
 def _bool(val: str | None) -> bool:
@@ -105,6 +116,20 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
     state_dir = (env.get("STATE_DIR") or "").strip()
     cfg.state_dir = Path(state_dir) if state_dir else DEFAULT_STATE_DIR
     cfg.poll_interval_seconds = int(env.get("POLL_INTERVAL_SECONDS", "180"))
+
+    # Webhook receiver: an event-driven alternative to the poll, supported by both modes (Vexa
+    # emits meeting.completed; discord-vexa-bridge emits the same envelope for meetings it
+    # writes straight into Vexa's Postgres). The poll stays the fallback either way.
+    cfg.webhook_enabled = _bool(env.get("WEBHOOK_ENABLED", "false"))
+    cfg.webhook_host = env.get("WEBHOOK_HOST", DEFAULT_WEBHOOK_HOST).strip() or DEFAULT_WEBHOOK_HOST
+    cfg.webhook_port = int(env.get("WEBHOOK_PORT", str(DEFAULT_WEBHOOK_PORT)))
+    cfg.webhook_path = env.get("WEBHOOK_PATH", DEFAULT_WEBHOOK_PATH).strip() or DEFAULT_WEBHOOK_PATH
+    cfg.webhook_public_url = (env.get("WEBHOOK_PUBLIC_URL") or "").strip() or None
+    cfg.webhook_delay_seconds = float(env.get("WEBHOOK_DELAY_SECONDS", str(DEFAULT_WEBHOOK_DELAY_SECONDS)))
+    if cfg.webhook_enabled:
+        cfg.webhook_secret = _req(env, "WEBHOOK_SECRET")
+    else:
+        cfg.webhook_secret = (env.get("WEBHOOK_SECRET") or "").strip() or None
 
     if cfg.bridge_mode == "graph":
         # No LLM and no note sink: the agent on the Vexa side does the writing. VAULT_DIR is
