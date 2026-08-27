@@ -8,6 +8,7 @@
 - **A diverged workspace remote is logged, not repaired.** If the workspace's git remote has diverged from the agent's local commits, the push step logs it and moves on; resolving the divergence is an operator step on the repo itself.
 - **No use of Vexa's own live meeting copilot.** Graph mode only folds finished transcripts after a meeting ends; it doesn't touch whatever real-time in-meeting assistant Vexa ships separately.
 - **No diarization of its own.** Speaker tags come from Vexa's transcript segments; the adapter doesn't re-diarize.
+- **The webhook path waits `WEBHOOK_DELAY_SECONDS` (default 20) before fetching the transcript.** Vexa's completed transition can be emitted just before the last transcript segment is flushed; fetching immediately would sometimes see a short/incomplete transcript. If the transcript is still below `MIN_TRANSCRIPT_SECONDS` after that delay, the meeting is left alone (not marked skipped) for the next poll pass to pick up once the transcript has caught up.
 - **Python 3.11 only.** Pinned for parity with `discord-vexa-bridge` (the source adapter). Not load-bearing here (no `audioop`), but kept so the adapter pair stays on one runtime.
 - **Not a published package.** `package = false` in `pyproject.toml` — it's a runnable service, not something you `pip install`.
 - **Not affiliated with Obsidian or Vexa.** This is an independent adapter between two projects.

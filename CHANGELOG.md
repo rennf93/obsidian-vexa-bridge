@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-27
+
+### Added
+- Event-driven webhook receiver: the bridge can now receive Vexa's signed `meeting.completed` webhook and process that meeting immediately instead of waiting for the next poll tick. The poll stays the fallback either way. Supported by both `BRIDGE_MODE=note` and `BRIDGE_MODE=graph`.
+- `summarizer/webhook.py`: signature verification (`X-Webhook-Signature: sha256=<hmac>`, plus the legacy `Authorization: Bearer <secret>`), `webhook.v1` envelope parsing, an aiohttp app (`POST <WEBHOOK_PATH>`, `GET /healthz`) with `event_id` dedup and a delayed background dispatch to the meeting handler, and `register_with_vexa` (`PUT /user/webhook`).
+- New env vars: `WEBHOOK_ENABLED` (default `false`), `WEBHOOK_HOST` (default `0.0.0.0`), `WEBHOOK_PORT` (default `8080`), `WEBHOOK_PATH` (default `/webhook`), `WEBHOOK_SECRET` (required when enabled), `WEBHOOK_PUBLIC_URL` (optional, triggers automatic registration with Vexa at startup), `WEBHOOK_DELAY_SECONDS` (default `20`). See [Configuration](docs/usage/config.md#webhook-receiver).
+- `process_event_meeting`: processes one webhook-delivered meeting outside the poll loop, reusing the same per-meeting logic (`process_meeting`) as the poll passes; a transcript still below `MIN_TRANSCRIPT_SECONDS` at event time is left for the next poll instead of being marked skipped, since Vexa's completed transition can precede the last transcript flush.
+- `Dockerfile`: `EXPOSE 8080` for the optional webhook receiver.
+
 ## [0.2.1] - 2026-08-27
 
 ### Changed

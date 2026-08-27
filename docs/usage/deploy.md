@@ -58,6 +58,24 @@ Add this service to your Vexa `docker-compose.yaml` (same network as `api-gatewa
 
 This requires a self-hosted Vexa 0.12.x compose deployment with `agent-api` reachable at `VEXA_API_URL` and a workspace already attached to it; see the graph mode setup walkthrough in the [README](https://github.com/rennf93/obsidian-vexa-bridge#graph-mode-setup). The full graph mode env var list is on [Configuration](config.md#graph-mode).
 
+## Docker Compose: webhook receiver (optional)
+
+Add these vars to either compose snippet above to also receive Vexa's `meeting.completed` webhook instead of relying solely on the poll. When Vexa runs on the same compose network, `WEBHOOK_PUBLIC_URL` can point straight at the service name and no host port needs publishing: Vexa reaches the container over the internal network the same way `api-gateway` does.
+
+```yaml
+  obsidian-vexa-bridge:
+    image: renzof93/obsidian-vexa-bridge:latest
+    environment:
+      # ...the rest of the note-mode or graph-mode vars above, plus:
+      WEBHOOK_ENABLED: "true"
+      WEBHOOK_SECRET: "${OBSIDIAN_WEBHOOK_SECRET}"
+      WEBHOOK_PUBLIC_URL: "http://obsidian-vexa-bridge:8080/webhook"  # in-network Vexa
+    networks: [vexa]
+    restart: unless-stopped
+```
+
+No `ports:` entry is required for this: the receiver only needs to be reachable from Vexa's own containers on the `vexa` network, not from the host. See [Events](https://github.com/rennf93/obsidian-vexa-bridge#events) in the README and the [webhook receiver vars](config.md#webhook-receiver) on Configuration.
+
 ## Environment
 
 | Variable | Required when | Default | Description |
