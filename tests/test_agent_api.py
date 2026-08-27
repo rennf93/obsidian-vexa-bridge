@@ -30,6 +30,15 @@ async def test_upload_posts_multipart_and_returns_workspace_path(monkeypatch):
     assert content.startswith("---\n")
 
 
+async def test_upload_accepts_live_files_key(monkeypatch):
+    # The shape Vexa 0.12.22 actually returns (verified live 2026-08-27).
+    async def fake_multipart(url, headers, field, filename, content):
+        return 200, {"files": [{"name": "abc-n.md", "path": "uploads/abc-n.md"}]}
+
+    monkeypatch.setattr(agent_api, "_http_post_multipart", fake_multipart)
+    assert await agent_api.upload(_cfg(), "n.md", "x") == "uploads/abc-n.md"
+
+
 async def test_upload_accepts_bare_list_response(monkeypatch):
     async def fake_multipart(url, headers, field, filename, content):
         return 200, [{"name": "n", "path": "uploads/n"}]
