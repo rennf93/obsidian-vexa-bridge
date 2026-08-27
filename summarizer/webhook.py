@@ -206,7 +206,7 @@ async def register_with_vexa(cfg: Config) -> None:
     }
     status, data = await _http_put_json(url, headers, body)
     if status < 200 or status >= 300:
-        raise VexaError(f"PUT /user/webhook -> HTTP {status}: {str(data)[:200]}")
+        raise VexaError(f"PUT /user/webhook -> HTTP {status}")  # body deliberately not echoed: it can carry the secret
     log.info("registered webhook with Vexa: %s", cfg.webhook_public_url)
 
 
