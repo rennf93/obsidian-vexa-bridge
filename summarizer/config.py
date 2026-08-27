@@ -32,7 +32,7 @@ DEFAULT_BRIDGE_MODE = "note"
 BRIDGE_MODES = {"note", "graph"}
 DEFAULT_VAULT_FOLDER = "Vexa"
 DEFAULT_ROUTINE_NAME = "meeting-to-graph"
-DEFAULT_ROUTINE_CRON = "*/15 * * * *"
+DEFAULT_ROUTINE_CRON = "0 * * * *"
 
 
 class ConfigError(ValueError):

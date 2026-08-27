@@ -189,7 +189,7 @@ def test_graph_mode_requires_only_vexa_vars():
     assert cfg.vault_dir is None
     assert cfg.vault_folder == "Vexa"
     assert cfg.graph_routine_name == "meeting-to-graph"
-    assert cfg.graph_routine_cron == "*/15 * * * *"
+    assert cfg.graph_routine_cron == "0 * * * *"
 
 
 def test_graph_mode_reads_vault_dir_and_routine_overrides():

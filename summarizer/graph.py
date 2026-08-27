@@ -3,8 +3,11 @@
 Per completed meeting the bridge renders the transcript as a frontmattered markdown file and
 uploads it to the user's Vexa workspace (it lands under uploads/). A standing Vexa routine
 (cron, see ROUTINE_PROMPT) runs the workspace's agents/meeting-to-graph.md over the inbox and
-commits OKF entities into kg/. The bridge then pushes the workspace to its git home whenever
-local commits are ahead, and fast-forwards <VAULT_DIR>/<vault_folder> when VAULT_DIR is set.
+commits OKF entities into kg/; that cron is the safety net. The fast path is
+trigger_routine_now: right after a pass uploads something, the bridge fires one immediate run
+of the same routine, so the fold usually happens within minutes instead of waiting for the
+next cron tick. The bridge then pushes the workspace to its git home whenever local commits
+are ahead, and fast-forwards <VAULT_DIR>/<vault_folder> when VAULT_DIR is set.
 
 Pure helpers first (rendering), then the three orchestration steps; HTTP goes through
 summarizer.agent_api so tests fake one seam.
@@ -61,17 +64,40 @@ def render_transcript(meta: MeetingMeta, transcript: list[Utterance]) -> str:
 
 
 async def ensure_routine(cfg: Config) -> bool:
-    """Create the standing fold-the-inbox routine unless one with the configured name exists.
+    """Create the standing fold-the-inbox routine, or fix it up when it's out of date.
 
-    Idempotent by name (Vexa has no upsert). AgentApiError propagates so the caller can log a
+    Vexa derives a routine's id from (subject, name, cron), so a routine already found under
+    cfg.graph_routine_name is only up to date when its cron also matches cfg.graph_routine_cron;
+    a cron change makes a new id, not an update to the old one, so the stale entry has to be
+    deleted (by the "id" its GET /agent/routines card carries) before the new one is created, or
+    Vexa ends up running both crons forever. AgentApiError propagates so the caller can log a
     501 (scheduler not wired) once and keep uploading; the routine can be created later.
     """
     existing = await agent_api.list_routines(cfg)
-    if any(r.get("name") == cfg.graph_routine_name for r in existing):
-        return True
+    current = next((r for r in existing if r.get("name") == cfg.graph_routine_name), None)
+    if current is not None:
+        if current.get("cron") == cfg.graph_routine_cron:
+            return True
+        log.warning(
+            "Vexa routine %r cron changed (%s -> %s); retiring the old entry",
+            cfg.graph_routine_name,
+            current.get("cron"),
+            cfg.graph_routine_cron,
+        )
+        await agent_api.delete_routine(cfg, str(current["id"]))
     await agent_api.create_routine(cfg, cfg.graph_routine_name, cfg.graph_routine_cron, ROUTINE_PROMPT, run_now=False)
     log.info("created Vexa routine %r (%s)", cfg.graph_routine_name, cfg.graph_routine_cron)
     return True
+
+
+async def trigger_routine_now(cfg: Config) -> None:
+    """Fire one immediate run of the fold routine (POST /agent/routines with run_now=True; Vexa
+    dedups the scheduled job on the routine's deterministic id, so this never creates a second
+    cron entry as long as the cron matches the routine ensure_routine reconciled). Called right
+    after a pass uploaded something, so a transcript is folded within minutes instead of waiting
+    for the next cron tick."""
+    await agent_api.create_routine(cfg, cfg.graph_routine_name, cfg.graph_routine_cron, ROUTINE_PROMPT, run_now=True)
+    log.info("triggered an immediate run of Vexa routine %r", cfg.graph_routine_name)
 
 
 async def push_if_ahead(cfg: Config) -> bool:

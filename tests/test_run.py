@@ -253,7 +253,9 @@ def _graph_cfg(tmp_path, dry_run=False, vault=False):
     return cfg
 
 
-def _patch_graph(monkeypatch, meetings, utts=None, upload_fn=None, ensure_fn=None, push_fn=None, pull_fn=None):
+def _patch_graph(
+    monkeypatch, meetings, utts=None, upload_fn=None, ensure_fn=None, push_fn=None, pull_fn=None, trigger_fn=None
+):
     async def fake_list(cfg, platforms):
         return meetings
 
@@ -280,6 +282,11 @@ def _patch_graph(monkeypatch, meetings, utts=None, upload_fn=None, ensure_fn=Non
             return pull_fn(cfg)
         return False
 
+    async def fake_trigger(cfg):
+        if trigger_fn is not None:
+            return await trigger_fn(cfg)
+        return None
+
     async def must_not_summarize(*a, **k):
         raise AssertionError("graph mode must not call the LLM")
 
@@ -289,6 +296,7 @@ def _patch_graph(monkeypatch, meetings, utts=None, upload_fn=None, ensure_fn=Non
     monkeypatch.setattr(m, "ensure_routine", fake_ensure)
     monkeypatch.setattr(m, "push_if_ahead", fake_push)
     monkeypatch.setattr(m, "pull_vault", fake_pull)
+    monkeypatch.setattr(m, "trigger_routine_now", fake_trigger)
     monkeypatch.setattr(m, "summarize", must_not_summarize)
     monkeypatch.setattr(m, "_routine_ready", False)
 
@@ -389,6 +397,60 @@ async def test_graph_mode_ensures_routine_pushes_and_pulls_each_pass(tmp_path, m
     _patch_graph(monkeypatch, [], ensure_fn=ensure, push_fn=push, pull_fn=pull)
     await m.run_once(_graph_cfg(tmp_path, vault=True))
     assert order == ["ensure", "push", "pull"]
+
+
+async def test_graph_mode_triggers_routine_after_uploads(tmp_path, monkeypatch):
+    order = []
+
+    async def upload(cfg, filename, content):
+        return "uploads/x"
+
+    async def trigger(cfg):
+        order.append("trigger")
+
+    async def push(cfg):
+        order.append("push")
+        return True
+
+    _patch_graph(monkeypatch, [_meeting()], upload_fn=upload, trigger_fn=trigger, push_fn=push)
+    result = await m.run_once(_graph_cfg(tmp_path))
+    assert result.uploaded == 1
+    assert order == ["trigger", "push"]
+
+
+async def test_graph_mode_no_trigger_when_nothing_uploaded(tmp_path, monkeypatch):
+    triggered = []
+
+    async def trigger(cfg):
+        triggered.append(1)
+
+    _patch_graph(monkeypatch, [], trigger_fn=trigger)
+    result = await m.run_once(_graph_cfg(tmp_path))
+    assert result.uploaded == 0
+    assert triggered == []
+
+
+async def test_graph_mode_no_trigger_on_dry_run(tmp_path, monkeypatch):
+    triggered = []
+
+    async def trigger(cfg):
+        triggered.append(1)
+
+    _patch_graph(monkeypatch, [_meeting()], trigger_fn=trigger)
+    result = await m.run_once(_graph_cfg(tmp_path, dry_run=True))
+    assert result.uploaded == 1
+    assert triggered == []
+
+
+async def test_graph_mode_trigger_failure_is_logged_not_raised(tmp_path, monkeypatch, caplog):
+    async def trigger(cfg):
+        raise RuntimeError("connection refused")
+
+    _patch_graph(monkeypatch, [_meeting()], trigger_fn=trigger)
+    with caplog.at_level("WARNING", logger="vexa-summarizer"):
+        result = await m.run_once(_graph_cfg(tmp_path))
+    assert result.failed == 0
+    assert "routine" in caplog.text
 
 
 async def test_graph_mode_dry_run_does_not_create_the_routine(tmp_path, monkeypatch):

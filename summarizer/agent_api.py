@@ -1,14 +1,19 @@
-"""Client for the five Vexa Agent API routes graph mode needs, via the gateway's /agent/* proxy.
+"""Client for the six Vexa Agent API routes graph mode needs, via the gateway's /agent/* proxy.
 
 Routes (Vexa 0.12.x, self-hosted compose only; hosted and Kubernetes answer 502 on /agent/*):
-  POST /agent/workspace/upload            multipart field "files" -> {"files": [{name, path}]}
-                                          (live 0.12.22; an "uploaded" key or a bare list is accepted too)
-  GET  /agent/routines                    -> {"routines": [...]} (a bare list is also accepted)
-  POST /agent/routines                    {name, cron, prompt, run_now} -> 201; 501 if no scheduler
-  GET  /agent/workspace/git-remote-status -> {tracked, ahead, behind, remote, branch, ...}
-  POST /agent/workspace/push              {} -> uses the saved token; 400 none saved; 502 diverged
+  POST   /agent/workspace/upload            multipart field "files" -> {"files": [{name, path}]}
+                                            (live 0.12.22; an "uploaded" key or a bare list is accepted too)
+  GET    /agent/routines                    -> {"routines": [...]} (a bare list is also accepted)
+  POST   /agent/routines                    {name, cron, prompt, run_now} -> 201; 501 if no scheduler
+  DELETE /agent/routines/{routine_id}       -> 200/204; 404 if the routine is already gone
+  GET    /agent/workspace/git-remote-status -> {tracked, ahead, behind, remote, branch, ...}
+  POST   /agent/workspace/push              {} -> uses the saved token; 400 none saved; 502 diverged
 
-Same X-API-Key auth as summarizer.vexa. HTTP is behind three async seams so tests fake them
+Vexa derives a routine's id from (subject, name, cron), so changing GRAPH_ROUTINE_CRON makes a
+different id, not an update to the old one; summarizer.graph.ensure_routine deletes the stale
+routine (by the "id" a GET /agent/routines card carries) before creating the new one.
+
+Same X-API-Key auth as summarizer.vexa. HTTP is behind four async seams so tests fake them
 without aiohttp.
 """
 
@@ -64,6 +69,12 @@ async def create_routine(cfg: Config, name: str, cron: str, prompt: str, run_now
     return data if isinstance(data, dict) else {}
 
 
+async def delete_routine(cfg: Config, routine_id: str) -> None:
+    """Delete one routine by id, e.g. a stale entry left behind by a GRAPH_ROUTINE_CRON change."""
+    status, data = await _http_delete_json(f"{cfg.vexa_api_url}/agent/routines/{routine_id}", _headers(cfg))
+    _check(status, data, "DELETE /agent/routines")
+
+
 async def remote_status(cfg: Config) -> dict[str, Any]:
     status, data = await _http_get_json(f"{cfg.vexa_api_url}/agent/workspace/git-remote-status", _headers(cfg))
     _check(status, data, "GET /agent/workspace/git-remote-status")
@@ -81,6 +92,14 @@ async def _http_get_json(url: str, headers: dict[str, str]) -> tuple[int, Any]:
 
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as resp:
+            return resp.status, await _maybe_json(resp)
+
+
+async def _http_delete_json(url: str, headers: dict[str, str]) -> tuple[int, Any]:
+    import aiohttp
+
+    async with aiohttp.ClientSession() as session:
+        async with session.delete(url, headers=headers) as resp:
             return resp.status, await _maybe_json(resp)
 
 
