@@ -14,15 +14,15 @@ from __future__ import annotations
 
 import logging
 import re
-import subprocess  # noqa: F401  # used by Task 4's push/pull orchestration
-from collections.abc import Callable  # noqa: F401  # used by Task 4's orchestration signatures
-from typing import TYPE_CHECKING, Any  # noqa: F401  # Any used by Task 4's orchestration signatures
+import subprocess
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
-from summarizer import agent_api  # noqa: F401  # used by Task 4; import now pins the Task 3 dependency
+from summarizer import agent_api
 from summarizer.llm import _format_transcript
 
 if TYPE_CHECKING:
-    from summarizer.config import Config  # noqa: F401  # used by Task 4's orchestration signatures
+    from summarizer.config import Config
     from summarizer.types import MeetingMeta, Utterance
 
 log = logging.getLogger("vexa-summarizer")
@@ -58,3 +58,49 @@ def render_transcript(meta: MeetingMeta, transcript: list[Utterance]) -> str:
         "",
     ]
     return "\n".join(head) + _format_transcript(transcript) + "\n"
+
+
+async def ensure_routine(cfg: Config) -> bool:
+    """Create the standing fold-the-inbox routine unless one with the configured name exists.
+
+    Idempotent by name (Vexa has no upsert). AgentApiError propagates so the caller can log a
+    501 (scheduler not wired) once and keep uploading; the routine can be created later.
+    """
+    existing = await agent_api.list_routines(cfg)
+    if any(r.get("name") == cfg.graph_routine_name for r in existing):
+        return True
+    await agent_api.create_routine(cfg, cfg.graph_routine_name, cfg.graph_routine_cron, ROUTINE_PROMPT, run_now=False)
+    log.info("created Vexa routine %r (%s)", cfg.graph_routine_name, cfg.graph_routine_cron)
+    return True
+
+
+async def push_if_ahead(cfg: Config) -> bool:
+    """Push the workspace to its git home when the agent has committed locally. Fast-forward only
+    on Vexa's side; a diverged remote surfaces as AgentApiError(502) for the caller to log."""
+    status = await agent_api.remote_status(cfg)
+    if not status.get("tracked") or int(status.get("ahead") or 0) <= 0:
+        return False
+    out = await agent_api.push(cfg)
+    log.info("pushed workspace %s -> %s", out.get("branch"), out.get("head_sha"))
+    return True
+
+
+def pull_vault(cfg: Config, run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run) -> bool:
+    """Fast-forward <VAULT_DIR>/<vault_folder> from its remote. Never merges, never raises: the vault
+    folder is a read-only mirror, so a non-fast-forward means someone edited it locally and the
+    operator has to resolve that deliberately."""
+    if cfg.vault_dir is None:
+        return False
+    folder = cfg.vault_dir / cfg.vault_folder
+    if not (folder / ".git").exists():
+        log.warning("VAULT_DIR set but %s is not a git checkout; skipping pull", folder)
+        return False
+    proc = run(["git", "-C", str(folder), "pull", "--ff-only"], capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        log.error(
+            "vault pull failed in %s (the folder must stay a fast-forward mirror; do not edit it locally): %s",
+            folder,
+            (proc.stderr or proc.stdout).strip(),
+        )
+        return False
+    return True
