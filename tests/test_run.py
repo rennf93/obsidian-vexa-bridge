@@ -391,6 +391,15 @@ async def test_graph_mode_ensures_routine_pushes_and_pulls_each_pass(tmp_path, m
     assert order == ["ensure", "push", "pull"]
 
 
+async def test_graph_mode_dry_run_does_not_create_the_routine(tmp_path, monkeypatch):
+    async def ensure(cfg):
+        raise AssertionError("DRY_RUN must not touch Vexa's routines")
+
+    _patch_graph(monkeypatch, [_meeting()], ensure_fn=ensure)
+    result = await m.run_once(_graph_cfg(tmp_path, dry_run=True))
+    assert result.uploaded == 1
+
+
 async def test_graph_mode_ensures_routine_once_per_process(tmp_path, monkeypatch):
     calls = []
 
