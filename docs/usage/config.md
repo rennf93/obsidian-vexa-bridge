@@ -51,7 +51,7 @@ These vars only matter when `BRIDGE_MODE=graph`. In graph mode `AI_*`, `OBSIDIAN
 
 ## Webhook receiver
 
-An event-driven alternative to the poll, supported by both `BRIDGE_MODE=note` and `BRIDGE_MODE=graph`; the poll stays the fallback either way. See [Events](../../README.md#events) for the full picture.
+An event-driven alternative to the poll, supported by both `BRIDGE_MODE=note` and `BRIDGE_MODE=graph`; the poll stays the fallback either way. See [Events](https://github.com/rennf93/obsidian-vexa-bridge#events) in the README for the full picture.
 
 | Variable | Required when | Default | Description |
 |---|---|---|---|
