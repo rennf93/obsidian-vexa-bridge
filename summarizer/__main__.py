@@ -13,6 +13,10 @@ ONCE=1) preserves the original one-shot behavior for DRY_RUN validation / manual
 
 DRY_RUN runs the full pipeline (including the LLM call) but writes nothing and doesn't mark
 done — safe to repeat for first-run validation.
+
+In BRIDGE_MODE=graph the summarize and sink steps are replaced by an upload of the transcript
+into the Vexa agent workspace (see summarizer/graph.py); the pass ends with a push of the
+workspace and, when VAULT_DIR is set, a fast-forward pull of the vault folder.
 """
 
 from __future__ import annotations
@@ -26,7 +30,9 @@ import sys
 from dataclasses import dataclass
 
 from summarizer import config as _config_mod
+from summarizer.agent_api import upload
 from summarizer.config import Config, ConfigError
+from summarizer.graph import ensure_routine, pull_vault, push_if_ahead, render_transcript, transcript_filename
 from summarizer.llm import summarize  # async; litellm lazy-imported inside
 from summarizer.obsidian import assemble_note, create_note, note_path, write_note_fs
 from summarizer.state import StateStore
@@ -35,10 +41,13 @@ from summarizer.vexa import get_transcript, list_completed_meetings, write_notes
 
 log = logging.getLogger("vexa-summarizer")
 
+_routine_ready: bool = False
+
 
 @dataclass
 class PassResult:
     summarized: int = 0
+    uploaded: int = 0
     skipped: int = 0
     failed: int = 0
     idle: int = 0
@@ -74,6 +83,9 @@ async def run_once(cfg: Config) -> PassResult:
     except Exception as exc:  # Vexa unreachable / 5xx — leave everything un-marked; retry next tick.
         log.warning("listing meetings failed: %s", exc)
         return result
+
+    if cfg.bridge_mode == "graph":
+        return await _run_once_graph(cfg, store, meetings)
 
     for meeting in meetings:
         key = meeting.id
@@ -117,6 +129,63 @@ async def run_once(cfg: Config) -> PassResult:
     return result
 
 
+async def _run_once_graph(cfg: Config, store: StateStore, meetings: list[Meeting]) -> PassResult:
+    """Graph mode pass: upload each new transcript to the workspace inbox, then push and pull.
+
+    mark_done commits at upload (the agent owns everything after that). The routine check runs
+    once per process (module-level _routine_ready latch) rather than every pass; a failure
+    leaves the latch unset so the next pass retries it. The push and the pull are best-effort
+    per pass: an Agent API failure there is logged and the pass still counts, so a scheduler
+    that is not wired yet or a diverged remote never blocks transcript delivery.
+    """
+    global _routine_ready
+    result = PassResult()
+    if not _routine_ready:
+        try:
+            await ensure_routine(cfg)
+        except Exception as exc:
+            log.warning("routine check failed (uploads continue; create the routine later): %s", exc)
+        else:
+            _routine_ready = True
+
+    for meeting in meetings:
+        key = meeting.id
+        if store.is_done(key) or store.is_poisoned(key):
+            result.idle += 1
+            continue
+        try:
+            utts = await get_transcript(cfg, meeting)
+            duration = sum(u.end_time - u.start_time for u in utts)
+            if duration < cfg.min_transcript_seconds:
+                store.mark_skipped(key, "low-transcript")
+                result.skipped += 1
+                log.info("meeting %s skipped: %.1fs < %.1fs min", key, duration, cfg.min_transcript_seconds)
+                continue
+            meta = _meta_from(meeting, utts, duration)
+            filename = transcript_filename(meta)
+            content = render_transcript(meta, utts)
+            if cfg.dry_run:
+                result.uploaded += 1
+                log.info("[DRY_RUN] meeting %s -> would upload %s", key, filename)
+                continue
+            path = await upload(cfg, filename, content)
+            store.mark_done(key, path)
+            result.uploaded += 1
+            log.info("meeting %s uploaded -> %s", key, path)
+        except Exception as exc:
+            store.record_failure(key)
+            result.failed += 1
+            log.warning("meeting %s failed: %s", key, exc)
+
+    if not cfg.dry_run:
+        try:
+            await push_if_ahead(cfg)
+        except Exception as exc:
+            log.warning("workspace push failed (resolve on the repo or via /agent/workspace/pull): %s", exc)
+        pull_vault(cfg)
+    return result
+
+
 async def _loop(cfg: Config) -> None:
     """Run run_once on a fixed interval until SIGTERM (docker stop) cancels the sleep.
 
@@ -139,8 +208,9 @@ async def _loop(cfg: Config) -> None:
             log.warning("run_once crashed: %s", exc)
         else:
             log.info(
-                "pass complete: %d summarized, %d skipped, %d failed, %d idle",
+                "pass complete: %d summarized, %d uploaded, %d skipped, %d failed, %d idle",
                 result.summarized,
+                result.uploaded,
                 result.skipped,
                 result.failed,
                 result.idle,
@@ -153,17 +223,31 @@ async def _loop(cfg: Config) -> None:
     log.info("received SIGTERM; exiting")
 
 
-def _once_flag(argv: list[str]) -> bool:
+def _parse(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="summarizer", description="Vexa -> Obsidian sink adapter")
     parser.add_argument("--once", action="store_true", help="run a single pass and exit")
-    args = parser.parse_args(argv)
-    env_once = os.getenv("ONCE", "").strip().lower() in {"1", "true", "yes"}
-    return bool(args.once or env_once)
+    sub = parser.add_subparsers(dest="command")
+    init = sub.add_parser("init-workspace", help="write the knowledge-workspace template into a local repo clone")
+    init.add_argument("target", help="path to your local clone of the workspace repo")
+    init.add_argument("--repo-url", required=True, help="HTTPS URL of that repo (what Vexa will clone)")
+    init.add_argument("--api-base", default=os.getenv("VEXA_API_URL", "http://localhost:18056"))
+    return parser.parse_args(argv)
 
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
-    once = _once_flag(sys.argv[1:])
+    args = _parse(sys.argv[1:])
+    if args.command == "init-workspace":
+        from pathlib import Path
+
+        from summarizer.workspace import init_workspace, setup_instructions
+
+        written = init_workspace(Path(args.target))
+        for p in written:
+            print(f"wrote {p}")
+        print(setup_instructions(args.api_base, args.repo_url))
+        return 0
+    once = bool(args.once or os.getenv("ONCE", "").strip().lower() in {"1", "true", "yes"})
     try:
         cfg = _config_mod.load_config()
     except ConfigError as exc:
@@ -172,8 +256,9 @@ def main() -> int:
     if once:
         result = asyncio.run(run_once(cfg))
         log.info(
-            "pass complete: %d summarized, %d skipped, %d failed, %d idle",
+            "pass complete: %d summarized, %d uploaded, %d skipped, %d failed, %d idle",
             result.summarized,
+            result.uploaded,
             result.skipped,
             result.failed,
             result.idle,

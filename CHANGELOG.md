@@ -1,10 +1,15 @@
 # Changelog
 
-All notable changes to this project are documented here. The format is based on
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Added
+- `BRIDGE_MODE=graph`: an alternate mode with no LLM in the bridge. Each completed meeting's transcript is uploaded into a Vexa agent workspace; a standing Vexa routine folds it into an Open Knowledge Format knowledge graph (people, companies, projects, meetings, decisions, topics, all wikilinked), and the bridge pushes the agent's commits and fast-forwards the vault mirror folder. Requires a self-hosted Vexa 0.12 with `agent-api`; hosted and Kubernetes Vexa stay `BRIDGE_MODE=note`.
+- `workspace-template/`: the Open Knowledge Format conventions, the fold routine prompt, and Dataview dashboards shipped for a new graph-mode workspace repo.
+- `python -m summarizer init-workspace <target> --repo-url <url> [--api-base <url>]`: copies the workspace template into a local repo clone and prints the Vexa calls that attach it as the agent workspace.
+- Direct-Postgres transcript fallback (`VEXA_DATABASE_URL`) for platforms the gateway's transcript route rejects, notably `discord` rows written by `discord-vexa-bridge`. Used by both modes; opt-in, tried only after the gateway call fails.
+- New env vars: `BRIDGE_MODE` (default `note`), `VEXA_VAULT_FOLDER` (default `Vexa`), `GRAPH_ROUTINE_NAME` (default `meeting-to-graph`), `GRAPH_ROUTINE_CRON` (default `*/15 * * * *`), `VEXA_DATABASE_URL` (optional). See [Configuration](docs/usage/config.md).
 
 ## [0.1.1] - 2026-07-07
 

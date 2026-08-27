@@ -9,4 +9,5 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY summarizer ./summarizer
+COPY workspace-template/ ./workspace-template/
 CMD ["python", "-m", "summarizer"]

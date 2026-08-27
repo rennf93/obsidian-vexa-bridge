@@ -33,6 +33,31 @@ Add this service to your Vexa `docker-compose.yaml` (same network as `api-gatewa
 
 `ollama` is an external network (`ollama_default`) so the adapter can reach the NAS ollama container; `obsidian-state` is a named volume for `state.json`. Mint the tx token once on the NAS with [`scripts/mint_token.sh`](https://github.com/rennf93/obsidian-vexa-bridge/blob/master/scripts/mint_token.sh) and append the printed `VEXA_SUMMARIZER_TOKEN=…` line to your `.env` — the script never writes the `.env` itself and never prints the full token.
 
+## Docker Compose: graph mode
+
+`BRIDGE_MODE=graph` uses the same image; drop the `AI_*` and `OBSIDIAN_*` vars (graph mode ignores them) and add `BRIDGE_MODE`. The `VAULT_DIR` bind mount is optional: include it only when this container should also fast-forward the vault mirror folder.
+
+```yaml
+  obsidian-vexa-bridge:
+    image: renzof93/obsidian-vexa-bridge:latest
+    environment:
+      BRIDGE_MODE: "graph"
+      VEXA_API_URL: http://api-gateway:8000
+      VEXA_API_KEY: "${VEXA_SUMMARIZER_TOKEN}"        # per-user tx token, minted once
+      SUMMARIZE_PLATFORMS: "discord,google_meet,zoom"
+      VAULT_DIR: "/vault"                             # optional; omit if this container can't reach the vault
+      POLL_INTERVAL_SECONDS: "180"
+      STATE_DIR: "/data/state"
+    depends_on: [api-gateway]
+    volumes:
+      - /volume1/vexa-vault:/vault                    # optional bind mount, only needed with VAULT_DIR set
+      - obsidian-state:/data/state                    # state.json idempotency
+    networks: [vexa]
+    restart: unless-stopped
+```
+
+This requires a self-hosted Vexa 0.12.x compose deployment with `agent-api` reachable at `VEXA_API_URL` and a workspace already attached to it; see the graph mode setup walkthrough in the [README](https://github.com/rennf93/obsidian-vexa-bridge#graph-mode-setup). The full graph mode env var list is on [Configuration](config.md#graph-mode).
+
 ## Environment
 
 | Variable | Required when | Default | Description |
