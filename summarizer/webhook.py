@@ -46,7 +46,17 @@ _DEDUP_MAXLEN = 2048
 _CFG_KEY: web.AppKey[Config] = web.AppKey("cfg")
 _HANDLER_KEY: web.AppKey[EventHandler] = web.AppKey("handler")
 _DEDUP_KEY: web.AppKey[_EventDedup] = web.AppKey("dedup")
-_TASKS_KEY: web.AppKey[set[asyncio.Task[None]]] = web.AppKey("tasks")
+
+# Module-level rather than per-app: there is one webhook receiver per process, and _loop needs
+# to drain these on shutdown without holding a reference to the aiohttp Application itself.
+_pending_tasks: set[asyncio.Task[None]] = set()
+
+
+def pending_event_tasks() -> set[asyncio.Task[None]]:
+    """Event-handler tasks scheduled by _handle_webhook that haven't finished yet (a copy, safe
+    to iterate while more requests arrive). Used by summarizer.__main__._loop to wait briefly for
+    in-flight work (e.g. a graph-mode push still waiting on the agent's commit) before exiting."""
+    return set(_pending_tasks)
 
 
 def verify_signature(secret: str, timestamp: str, body: bytes, header_value: str | None) -> bool:
@@ -128,7 +138,6 @@ async def _handle_webhook(request: web.Request) -> web.Response:
     cfg = request.app[_CFG_KEY]
     handler = request.app[_HANDLER_KEY]
     dedup = request.app[_DEDUP_KEY]
-    tasks = request.app[_TASKS_KEY]
 
     body = await request.read()
     timestamp = request.headers.get("X-Webhook-Timestamp", "")
@@ -160,8 +169,8 @@ async def _handle_webhook(request: web.Request) -> web.Response:
         dedup.add(event_id)
 
     task = asyncio.create_task(_delayed_call(handler, meeting, cfg.webhook_delay_seconds))
-    tasks.add(task)
-    task.add_done_callback(tasks.discard)
+    _pending_tasks.add(task)
+    task.add_done_callback(_pending_tasks.discard)
     return web.json_response({"ok": True, "meeting_id": meeting.id}, status=202)
 
 
@@ -174,7 +183,6 @@ def make_app(cfg: Config, handler: EventHandler) -> web.Application:
     app[_CFG_KEY] = cfg
     app[_HANDLER_KEY] = handler
     app[_DEDUP_KEY] = _EventDedup()
-    app[_TASKS_KEY] = set()
     app.router.add_post(cfg.webhook_path, _handle_webhook)
     app.router.add_get("/healthz", _healthz)
     return app
