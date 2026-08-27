@@ -3,8 +3,11 @@
 Per completed meeting the bridge renders the transcript as a frontmattered markdown file and
 uploads it to the user's Vexa workspace (it lands under uploads/). A standing Vexa routine
 (cron, see ROUTINE_PROMPT) runs the workspace's agents/meeting-to-graph.md over the inbox and
-commits OKF entities into kg/. The bridge then pushes the workspace to its git home whenever
-local commits are ahead, and fast-forwards <VAULT_DIR>/<vault_folder> when VAULT_DIR is set.
+commits OKF entities into kg/; that cron is the safety net. The fast path is
+trigger_routine_now: right after a pass uploads something, the bridge fires one immediate run
+of the same routine, so the fold usually happens within minutes instead of waiting for the
+next cron tick. The bridge then pushes the workspace to its git home whenever local commits
+are ahead, and fast-forwards <VAULT_DIR>/<vault_folder> when VAULT_DIR is set.
 
 Pure helpers first (rendering), then the three orchestration steps; HTTP goes through
 summarizer.agent_api so tests fake one seam.
@@ -72,6 +75,15 @@ async def ensure_routine(cfg: Config) -> bool:
     await agent_api.create_routine(cfg, cfg.graph_routine_name, cfg.graph_routine_cron, ROUTINE_PROMPT, run_now=False)
     log.info("created Vexa routine %r (%s)", cfg.graph_routine_name, cfg.graph_routine_cron)
     return True
+
+
+async def trigger_routine_now(cfg: Config) -> None:
+    """Fire one immediate run of the fold routine (POST /agent/routines with run_now=True; Vexa
+    dedups the scheduled job on the routine's deterministic id, so this never creates a second
+    cron entry). Called right after a pass uploaded something, so a transcript is folded within
+    minutes instead of waiting for the next cron tick."""
+    await agent_api.create_routine(cfg, cfg.graph_routine_name, cfg.graph_routine_cron, ROUTINE_PROMPT, run_now=True)
+    log.info("triggered an immediate run of Vexa routine %r", cfg.graph_routine_name)
 
 
 async def push_if_ahead(cfg: Config) -> bool:

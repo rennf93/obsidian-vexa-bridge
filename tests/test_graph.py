@@ -67,7 +67,7 @@ async def test_ensure_routine_creates_when_missing(monkeypatch):
     monkeypatch.setattr(agent_api, "list_routines", fake_list)
     monkeypatch.setattr(agent_api, "create_routine", fake_create)
     assert await graph.ensure_routine(_cfg()) is True
-    assert created == [("meeting-to-graph", "*/15 * * * *", graph.ROUTINE_PROMPT, False)]
+    assert created == [("meeting-to-graph", "0 * * * *", graph.ROUTINE_PROMPT, False)]
 
 
 async def test_ensure_routine_is_a_noop_when_present(monkeypatch):
@@ -89,6 +89,27 @@ async def test_ensure_routine_propagates_api_errors(monkeypatch):
     monkeypatch.setattr(agent_api, "list_routines", fake_list)
     with pytest.raises(agent_api.AgentApiError):
         await graph.ensure_routine(_cfg())
+
+
+async def test_trigger_routine_now_posts_run_now(monkeypatch):
+    created = []
+
+    async def fake_create(cfg, name, cron, prompt, run_now=False):
+        created.append((name, cron, prompt, run_now))
+        return {"job_id": "job_1"}
+
+    monkeypatch.setattr(agent_api, "create_routine", fake_create)
+    await graph.trigger_routine_now(_cfg())
+    assert created == [("meeting-to-graph", "0 * * * *", graph.ROUTINE_PROMPT, True)]
+
+
+async def test_trigger_routine_now_propagates_api_errors(monkeypatch):
+    async def fake_create(cfg, name, cron, prompt, run_now=False):
+        raise agent_api.AgentApiError("POST /agent/routines -> HTTP 502", 502)
+
+    monkeypatch.setattr(agent_api, "create_routine", fake_create)
+    with pytest.raises(agent_api.AgentApiError):
+        await graph.trigger_routine_now(_cfg())
 
 
 async def test_push_if_ahead_pushes_only_when_ahead(monkeypatch):

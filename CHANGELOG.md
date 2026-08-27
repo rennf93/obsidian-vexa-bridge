@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Changed
+- Graph mode triggers an immediate run of the fold routine right after a pass uploads a transcript, instead of waiting for the next cron tick; `GRAPH_ROUTINE_CRON` now defaults to hourly (`0 * * * *`, was every 15 minutes) since the cron is now just the safety net.
+
 ## [0.2.0] - 2026-08-27
 
 ### Added

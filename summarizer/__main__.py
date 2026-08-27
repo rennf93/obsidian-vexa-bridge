@@ -15,8 +15,9 @@ DRY_RUN runs the full pipeline (including the LLM call) but writes nothing and d
 done — safe to repeat for first-run validation.
 
 In BRIDGE_MODE=graph the summarize and sink steps are replaced by an upload of the transcript
-into the Vexa agent workspace (see summarizer/graph.py); the pass ends with a push of the
-workspace and, when VAULT_DIR is set, a fast-forward pull of the vault folder.
+into the Vexa agent workspace (see summarizer/graph.py); once something is uploaded the bridge
+triggers an immediate run of the fold routine, then the pass ends with a push of the workspace
+and, when VAULT_DIR is set, a fast-forward pull of the vault folder.
 """
 
 from __future__ import annotations
@@ -32,7 +33,14 @@ from dataclasses import dataclass
 from summarizer import config as _config_mod
 from summarizer.agent_api import upload
 from summarizer.config import Config, ConfigError
-from summarizer.graph import ensure_routine, pull_vault, push_if_ahead, render_transcript, transcript_filename
+from summarizer.graph import (
+    ensure_routine,
+    pull_vault,
+    push_if_ahead,
+    render_transcript,
+    transcript_filename,
+    trigger_routine_now,
+)
 from summarizer.llm import summarize  # async; litellm lazy-imported inside
 from summarizer.obsidian import assemble_note, create_note, note_path, write_note_fs
 from summarizer.state import StateStore
@@ -130,14 +138,19 @@ async def run_once(cfg: Config) -> PassResult:
 
 
 async def _run_once_graph(cfg: Config, store: StateStore, meetings: list[Meeting]) -> PassResult:
-    """Graph mode pass: upload each new transcript to the workspace inbox, then push and pull.
+    """Graph mode pass: upload each new transcript to the workspace inbox, trigger an immediate
+    fold, then push and pull.
 
     mark_done commits at upload (the agent owns everything after that). The routine check runs
     once per process (module-level _routine_ready latch) rather than every pass, and never in
     DRY_RUN (a dry run must write nothing, on Vexa's side included); a failure
-    leaves the latch unset so the next pass retries it. The push and the pull are best-effort
-    per pass: an Agent API failure there is logged and the pass still counts, so a scheduler
-    that is not wired yet or a diverged remote never blocks transcript delivery.
+    leaves the latch unset so the next pass retries it. When the pass uploaded anything (and
+    it's not a dry run), it also fires trigger_routine_now so the fold happens within minutes
+    instead of waiting for the routine's cron; that trigger is best-effort like the push and the
+    pull below, so a failure there is logged and the cron picks it up next tick. The push and
+    the pull are best-effort per pass: an Agent API failure there is logged and the pass still
+    counts, so a scheduler that is not wired yet or a diverged remote never blocks transcript
+    delivery.
     """
     global _routine_ready
     result = PassResult()
@@ -179,6 +192,11 @@ async def _run_once_graph(cfg: Config, store: StateStore, meetings: list[Meeting
             log.warning("meeting %s failed: %s", key, exc)
 
     if not cfg.dry_run:
+        if result.uploaded > 0:
+            try:
+                await trigger_routine_now(cfg)
+            except Exception as exc:
+                log.warning("immediate routine run failed (the cron picks it up): %s", exc)
         try:
             await push_if_ahead(cfg)
         except Exception as exc:

@@ -35,7 +35,7 @@ Same pattern, opposite direction, separate repo + image + release cadence.
 2. `python -m summarizer init-workspace <clone> --repo-url https://github.com/<you>/<repo>.git`; commit and push the template.
 3. Save the token and attach the repo as your workspace with the two `curl` calls the command prints (`/agent/workspace/git-token`, `/agent/workspace/swap`), then check `/agent/workspace/tree` shows `CLAUDE.md` at the root.
 4. Clone the same repo into your vault as `<vault>/Vexa` (or the name you set in `VEXA_VAULT_FOLDER`; the Dataview dashboards assume `Vexa`).
-5. Run the bridge with `BRIDGE_MODE=graph`, `VEXA_API_URL`, `VEXA_API_KEY`, and `VAULT_DIR` when the bridge runs where the vault lives. On its first pass it creates the routine `meeting-to-graph` (every 15 minutes by default).
+5. Run the bridge with `BRIDGE_MODE=graph`, `VEXA_API_URL`, `VEXA_API_KEY`, and `VAULT_DIR` when the bridge runs where the vault lives. On its first pass it creates the routine `meeting-to-graph`; the bridge triggers an immediate run right after it uploads a transcript, and the routine's cron (`GRAPH_ROUTINE_CRON`, default hourly) is the safety net.
 
 ### The vault folder rule
 
