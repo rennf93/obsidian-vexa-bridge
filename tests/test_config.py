@@ -178,3 +178,52 @@ def test_default_sink_is_fs_when_obsidian_sink_absent():
     cfg = config.load_config(env)
     assert cfg.obsidian_sink == "fs"
     assert cfg.vault_dir == Path("/vault")
+
+
+# --- graph mode --------------------------------------------------------
+
+
+def test_graph_mode_requires_only_vexa_vars():
+    cfg = config.load_config({"BRIDGE_MODE": "graph", "VEXA_API_URL": "http://v", "VEXA_API_KEY": "k"})
+    assert cfg.bridge_mode == "graph"
+    assert cfg.vault_dir is None
+    assert cfg.vault_folder == "Vexa"
+    assert cfg.graph_routine_name == "meeting-to-graph"
+    assert cfg.graph_routine_cron == "*/15 * * * *"
+
+
+def test_graph_mode_reads_vault_dir_and_routine_overrides():
+    cfg = config.load_config(
+        {
+            "BRIDGE_MODE": "graph",
+            "VEXA_API_URL": "http://v",
+            "VEXA_API_KEY": "k",
+            "VAULT_DIR": "/vault",
+            "VEXA_VAULT_FOLDER": "Knowledge",
+            "GRAPH_ROUTINE_NAME": "fold",
+            "GRAPH_ROUTINE_CRON": "0 * * * *",
+        }
+    )
+    assert str(cfg.vault_dir) == "/vault"
+    assert cfg.vault_folder == "Knowledge"
+    assert cfg.graph_routine_name == "fold"
+    assert cfg.graph_routine_cron == "0 * * * *"
+
+
+def test_graph_mode_ignores_obsidian_sink_requirements():
+    # In note mode the mcp sink would demand OBSIDIAN_MCP_TOKEN; graph mode never reads it.
+    cfg = config.load_config(
+        {"BRIDGE_MODE": "graph", "VEXA_API_URL": "http://v", "VEXA_API_KEY": "k", "OBSIDIAN_SINK": "mcp"}
+    )
+    assert cfg.bridge_mode == "graph"
+
+
+def test_unknown_bridge_mode_is_a_config_error():
+    with pytest.raises(config.ConfigError):
+        config.load_config({"BRIDGE_MODE": "vault", "VEXA_API_URL": "http://v", "VEXA_API_KEY": "k"})
+
+
+def test_default_mode_is_note_and_unchanged():
+    cfg = config.load_config({"VEXA_API_URL": "http://v", "VEXA_API_KEY": "k", "VAULT_DIR": "/vault"})
+    assert cfg.bridge_mode == "note"
+    assert cfg.obsidian_sink == "fs"
