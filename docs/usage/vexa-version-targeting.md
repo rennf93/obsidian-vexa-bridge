@@ -16,6 +16,10 @@ These reads ride the free-form `data` field that Vexa exposes per meeting, so th
 
 `VEXA_NOTES_ENABLED` defaults to `false`. The `write_notes` path PATCHes `{"data": {"notes": markdown}}` into the Vexa meeting. Vexa 0.12 has no external write surface for `meeting.data.processed` views — there is no stable, documented way for an external integration to write back into the meeting's processed-data view. That gap is tracked by **Vexa issue #477**. Until that lands, keep `VEXA_NOTES_ENABLED=false` and treat the Obsidian vault as the source of truth for summaries.
 
+## Graph mode: self-hosted only
+
+`BRIDGE_MODE=graph` targets a self-hosted Vexa 0.12.x compose deployment running `agent-api`; the hosted Vexa service and the Kubernetes deployment both answer 502 on `/agent/*`, so `BRIDGE_MODE=note` is the only option against those targets. Graph mode calls four Agent API routes through the gateway's `/agent/*` proxy: `POST /agent/workspace/upload` to land each transcript in the workspace inbox, `GET /agent/routines` and `POST /agent/routines` to create the standing fold routine once, `GET /agent/workspace/git-remote-status` to check whether the agent has committed locally, and `POST /agent/workspace/push` to push those commits to the workspace's git home.
+
 ## Vault is the source of truth
 
 Because Vexa's PATCH can't carry arbitrary metadata and the write-back surface isn't stable, the adapter owns the "which meetings have I done" set locally in `state.json` and writes the human-readable artifact to the vault. The vault note (with frontmatter, TL;DR, action items, and the raw transcript) is the durable record; Vexa stays the source of truth only for the raw meeting + transcript.

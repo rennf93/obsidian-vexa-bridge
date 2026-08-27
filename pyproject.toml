@@ -10,6 +10,7 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
     "litellm",
     "aiohttp",
+    "asyncpg>=0.31.0",
 ]
 
 [project.optional-dependencies]

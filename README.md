@@ -23,6 +23,26 @@ Same pattern, opposite direction, separate repo + image + release cadence.
 
 ---
 
+## Two modes
+
+`BRIDGE_MODE=note` (default): one summary note per completed meeting, written by an LLM call, into your vault (filesystem or MCP sink). Works against any Vexa 0.12 deployment, hosted included.
+
+`BRIDGE_MODE=graph`: no LLM in the bridge. Each transcript is uploaded into your Vexa agent workspace, a standing Vexa routine folds it into an Open Knowledge Format knowledge graph (people, companies, projects, meetings, decisions, topics, all `[[wikilinked]]`), the bridge pushes the agent's commits to the repo's home and fast-forwards the `Vexa/` folder of your vault. Requires a self-hosted Vexa 0.12 with `agent-api` (the hosted service and Kubernetes answer 502 on `/agent/*`) and a Claude Code credential on that stack.
+
+### Graph mode setup
+
+1. Create a private git repo on an HTTPS host (GitHub works; Vexa speaks HTTPS with a personal access token only) and clone it locally.
+2. `python -m summarizer init-workspace <clone> --repo-url https://github.com/<you>/<repo>.git`; commit and push the template.
+3. Save the token and attach the repo as your workspace with the two `curl` calls the command prints (`/agent/workspace/git-token`, `/agent/workspace/swap`), then check `/agent/workspace/tree` shows `CLAUDE.md` at the root.
+4. Clone the same repo into your vault as `<vault>/Vexa` (or the name you set in `VEXA_VAULT_FOLDER`; the Dataview dashboards assume `Vexa`).
+5. Run the bridge with `BRIDGE_MODE=graph`, `VEXA_API_URL`, `VEXA_API_KEY`, and `VAULT_DIR` when the bridge runs where the vault lives. On its first pass it creates the routine `meeting-to-graph` (every 15 minutes by default).
+
+### The vault folder rule
+
+`<vault>/Vexa` is a read-only mirror: read it and link into it from the rest of your vault, but change it by talking to the agent, not by editing files. The bridge pulls it with `git pull --ff-only` when it can reach it; when the bridge runs on another machine, keep the folder pulled with the Obsidian Git plugin or any timer (`cron`, `systemd`, `launchd`) running the same command.
+
+---
+
 ## How it works
 
 ```

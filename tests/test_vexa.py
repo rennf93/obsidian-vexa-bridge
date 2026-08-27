@@ -10,6 +10,8 @@ The Vexa api-gateway shapes (verified against the live API):
 start_time / end_time are ISO-8601 strings (epoch-second floats also accepted). X-API-Key header auth.
 """
 
+import sys
+import types
 from datetime import UTC
 
 import pytest
@@ -269,3 +271,81 @@ async def test_list_5xx_raises(monkeypatch):
     monkeypatch.setattr(vexa, "_http_get_json", fake_get)
     with pytest.raises(vexa.VexaError):
         await vexa.list_completed_meetings(_cfg(), ["discord"])
+
+
+class _FakeConn:
+    def __init__(self, rows):
+        self.rows = rows
+        self.closed = False
+        self.queries = []
+
+    async def fetch(self, sql, *args):
+        self.queries.append((sql, args))
+        return self.rows
+
+    async def close(self):
+        self.closed = True
+
+
+def _fake_asyncpg(monkeypatch, rows, dsn_seen):
+    conn = _FakeConn(rows)
+
+    async def connect(dsn):
+        dsn_seen.append(dsn)
+        return conn
+
+    monkeypatch.setitem(sys.modules, "asyncpg", types.SimpleNamespace(connect=connect))
+    return conn
+
+
+async def test_transcript_falls_back_to_db_on_422_when_dsn_configured(monkeypatch):
+    async def fake_get(url, headers):
+        return 422, {"detail": "unsupported platform"}
+
+    monkeypatch.setattr(vexa, "_http_get_json", fake_get)
+    dsn_seen = []
+    rows = [
+        {"speaker": "Renzo", "text": "later", "start_time": 5.0, "end_time": 9.0},
+        {"speaker": None, "text": None, "start_time": 0.0, "end_time": 2.0},
+    ]
+    conn = _fake_asyncpg(monkeypatch, rows, dsn_seen)
+    cfg = _cfg()
+    cfg.vexa_database_url = "postgresql://u:p@db/vexa"
+    from datetime import datetime as _dt
+
+    from summarizer.types import Meeting
+
+    meeting = Meeting(
+        id=7,
+        platform="discord",
+        native_meeting_id="d7",
+        start=_dt.fromtimestamp(1.0, tz=UTC),
+        end=_dt.fromtimestamp(2.0, tz=UTC),
+    )
+    utts = await vexa.get_transcript(cfg, meeting)
+    assert dsn_seen == ["postgresql://u:p@db/vexa"]
+    assert conn.closed is True
+    assert conn.queries[0][1] == (7,)
+    assert [(u.speaker, u.text, u.start_time) for u in utts] == [("Renzo", "later", 5.0), ("Unknown", "", 0.0)]
+
+
+async def test_transcript_422_without_dsn_still_raises(monkeypatch):
+    async def fake_get(url, headers):
+        return 422, {"detail": "unsupported platform"}
+
+    monkeypatch.setattr(vexa, "_http_get_json", fake_get)
+    cfg = _cfg()
+    cfg.vexa_database_url = None
+    from datetime import datetime as _dt
+
+    from summarizer.types import Meeting
+
+    meeting = Meeting(
+        id=7,
+        platform="discord",
+        native_meeting_id="d7",
+        start=_dt.fromtimestamp(1.0, tz=UTC),
+        end=_dt.fromtimestamp(2.0, tz=UTC),
+    )
+    with pytest.raises(vexa.VexaError):
+        await vexa.get_transcript(cfg, meeting)
