@@ -139,17 +139,27 @@ async def _get_transcript_from_db(cfg: Config, meeting: Meeting) -> list[Utteran
 
     Reads the same `transcriptions` rows the discord-bridge inserts (speaker, text,
     second-offset start/end), ordered by start time. No gateway round-trip.
+
+    Any asyncpg error (server-side PostgresError or client-side InterfaceError) or OSError
+    (connection refused, DNS failure, auth failure, a bad query, a closed connection)
+    is re-raised as VexaError so callers see the same error type as the gateway path -- the
+    original exception is kept as __cause__ for debugging.
     """
     import asyncpg
 
     from summarizer.types import Utterance
 
-    conn = await asyncpg.connect(cfg.vexa_database_url)
+    try:
+        conn = await asyncpg.connect(cfg.vexa_database_url)
+    except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError) as exc:
+        raise VexaError(f"asyncpg.connect failed for meeting {meeting.id}: {exc}") from exc
     try:
         rows = await conn.fetch(
             "SELECT speaker, text, start_time, end_time FROM transcriptions WHERE meeting_id=$1 ORDER BY start_time",
             meeting.id,
         )
+    except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError) as exc:
+        raise VexaError(f"transcript query failed for meeting {meeting.id}: {exc}") from exc
     finally:
         await conn.close()
     return [

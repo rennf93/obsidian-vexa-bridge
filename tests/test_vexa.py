@@ -349,3 +349,35 @@ async def test_transcript_422_without_dsn_still_raises(monkeypatch):
     )
     with pytest.raises(vexa.VexaError):
         await vexa.get_transcript(cfg, meeting)
+
+
+async def test_get_transcript_from_db_wraps_connect_failure_as_vexa_error(monkeypatch):
+    class _FakePostgresError(Exception):
+        pass
+
+    original = OSError("connection refused")
+
+    async def connect(dsn):
+        raise original
+
+    monkeypatch.setitem(
+        sys.modules,
+        "asyncpg",
+        types.SimpleNamespace(connect=connect, PostgresError=_FakePostgresError, InterfaceError=_FakePostgresError),
+    )
+    from datetime import datetime as _dt
+
+    from summarizer.types import Meeting
+
+    meeting = Meeting(
+        id=7,
+        platform="discord",
+        native_meeting_id="d7",
+        start=_dt.fromtimestamp(1.0, tz=UTC),
+        end=_dt.fromtimestamp(2.0, tz=UTC),
+    )
+    cfg = _cfg()
+    cfg.vexa_database_url = "postgresql://u:p@db/vexa"
+    with pytest.raises(vexa.VexaError) as exc_info:
+        await vexa._get_transcript_from_db(cfg, meeting)
+    assert exc_info.value.__cause__ is original

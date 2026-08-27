@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Changed
+- Graph mode's poll pass (`_run_once_graph`) and webhook event path (`process_event_meeting`) now share one helper, `graph.finalize_graph_pass`, for the trigger-the-fold / push / pull sequence instead of duplicating it; behavior is unchanged, including the event path's extra wait for the agent's commit before pushing.
+- The direct-Postgres transcript fallback (`vexa._get_transcript_from_db`) now wraps `asyncpg.connect` and query failures (any `asyncpg` error or `OSError`) as `VexaError` instead of letting them surface raw, with the original exception kept as `__cause__`.
+
 ## [0.3.1] - 2026-08-27
 
 ### Changed
