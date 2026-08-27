@@ -10,4 +10,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY summarizer ./summarizer
 COPY workspace-template/ ./workspace-template/
+# Only listens when WEBHOOK_ENABLED=true; a no-op otherwise (matches the app's own default).
+EXPOSE 8080
 CMD ["python", "-m", "summarizer"]
