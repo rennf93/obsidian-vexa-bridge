@@ -47,4 +47,4 @@ jobs:
         run: docker build -t obsidian-vexa-bridge:ci .
       - name: Smoke test (Python 3.11 + deps import + summarizer package import inside the image)
         run: |
-          docker run --rm obsidian-vexa-bridge:ci python -c "import sys; assert sys.version_info[:2]==(3,11), sys.version; import litellm, aiohttp; import summarizer.__main__; print('image OK', sys.version)"
+          docker run --rm obsidian-vexa-bridge:ci python -c "import sys; assert sys.version_info[:2]==(3,11), sys.version; import litellm, aiohttp, asyncpg; import summarizer.__main__; print('image OK', sys.version)"

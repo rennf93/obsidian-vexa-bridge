@@ -41,6 +41,8 @@ from summarizer.vexa import get_transcript, list_completed_meetings, write_notes
 
 log = logging.getLogger("vexa-summarizer")
 
+_routine_ready: bool = False
+
 
 @dataclass
 class PassResult:
@@ -130,16 +132,21 @@ async def run_once(cfg: Config) -> PassResult:
 async def _run_once_graph(cfg: Config, store: StateStore, meetings: list[Meeting]) -> PassResult:
     """Graph mode pass: upload each new transcript to the workspace inbox, then push and pull.
 
-    mark_done commits at upload (the agent owns everything after that). The routine check,
-    the push and the pull are best-effort per pass: an Agent API failure there is logged and the
-    pass still counts, so a scheduler that is not wired yet or a diverged remote never blocks
-    transcript delivery.
+    mark_done commits at upload (the agent owns everything after that). The routine check runs
+    once per process (module-level _routine_ready latch) rather than every pass; a failure
+    leaves the latch unset so the next pass retries it. The push and the pull are best-effort
+    per pass: an Agent API failure there is logged and the pass still counts, so a scheduler
+    that is not wired yet or a diverged remote never blocks transcript delivery.
     """
+    global _routine_ready
     result = PassResult()
-    try:
-        await ensure_routine(cfg)
-    except Exception as exc:
-        log.warning("routine check failed (uploads continue; create the routine later): %s", exc)
+    if not _routine_ready:
+        try:
+            await ensure_routine(cfg)
+        except Exception as exc:
+            log.warning("routine check failed (uploads continue; create the routine later): %s", exc)
+        else:
+            _routine_ready = True
 
     for meeting in meetings:
         key = meeting.id

@@ -290,6 +290,7 @@ def _patch_graph(monkeypatch, meetings, utts=None, upload_fn=None, ensure_fn=Non
     monkeypatch.setattr(m, "push_if_ahead", fake_push)
     monkeypatch.setattr(m, "pull_vault", fake_pull)
     monkeypatch.setattr(m, "summarize", must_not_summarize)
+    monkeypatch.setattr(m, "_routine_ready", False)
 
 
 async def test_graph_mode_uploads_transcript_and_marks_done(tmp_path, monkeypatch):
@@ -388,6 +389,46 @@ async def test_graph_mode_ensures_routine_pushes_and_pulls_each_pass(tmp_path, m
     _patch_graph(monkeypatch, [], ensure_fn=ensure, push_fn=push, pull_fn=pull)
     await m.run_once(_graph_cfg(tmp_path, vault=True))
     assert order == ["ensure", "push", "pull"]
+
+
+async def test_graph_mode_ensures_routine_once_per_process(tmp_path, monkeypatch):
+    calls = []
+
+    async def ensure(cfg):
+        calls.append(1)
+        return True
+
+    _patch_graph(monkeypatch, [_meeting()], ensure_fn=ensure)
+    cfg = _graph_cfg(tmp_path)
+    await m.run_once(cfg)
+    await m.run_once(cfg)
+    assert calls == [1]
+
+
+async def test_graph_mode_routine_failure_retries_next_pass(tmp_path, monkeypatch):
+    calls = []
+
+    async def ensure(cfg):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("connection refused")
+        return True
+
+    upload_calls = []
+
+    async def upload(cfg, filename, content):
+        upload_calls.append(1)
+        return "uploads/x"
+
+    _patch_graph(monkeypatch, [_meeting()], ensure_fn=ensure, upload_fn=upload)
+    cfg = _graph_cfg(tmp_path)
+    result1 = await m.run_once(cfg)
+    # second pass: meeting 7 is already marked done, so use a fresh meeting id
+    _patch_graph(monkeypatch, [_meeting(mid=8, native="d8")], ensure_fn=ensure, upload_fn=upload)
+    result2 = await m.run_once(cfg)
+    assert calls == [1, 1]
+    assert result1.uploaded == 1
+    assert result2.uploaded == 1
 
 
 async def test_graph_mode_routine_501_is_logged_and_uploads_continue(tmp_path, monkeypatch, caplog):

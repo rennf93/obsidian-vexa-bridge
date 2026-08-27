@@ -1,2 +1,3 @@
 litellm
 aiohttp
+asyncpg>=0.31.0
