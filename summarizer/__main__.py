@@ -39,7 +39,7 @@ import sys
 from dataclasses import dataclass
 
 from summarizer import config as _config_mod
-from summarizer.agent_api import upload
+from summarizer.agent_api import git_head, upload
 from summarizer.config import Config, ConfigError
 from summarizer.graph import (
     ensure_routine,
@@ -48,6 +48,7 @@ from summarizer.graph import (
     render_transcript,
     transcript_filename,
     trigger_routine_now,
+    wait_for_commit,
 )
 from summarizer.llm import summarize  # async; litellm lazy-imported inside
 from summarizer.obsidian import assemble_note, create_note, note_path, write_note_fs
@@ -228,9 +229,14 @@ async def process_event_meeting(cfg: Config, meeting: Meeting) -> PassResult:
 
     mark_low_transcript=False: the event can fire before Vexa's last transcript flush, so a
     below-minimum transcript is left for the next poll instead of being permanently skipped.
-    In graph mode this also runs the same best-effort post-steps as a pass that uploaded
-    something (trigger_routine_now, push_if_ahead, pull_vault); note mode has nothing else to
-    do once process_meeting returns.
+
+    In graph mode, when something was uploaded, this also waits for the agent's commit before
+    pushing: it records the workspace's HEAD sha before triggering the fold (best-effort; a
+    failure there just means "unknown base", not a hard stop), triggers the fold, then polls for
+    a new commit up to WEBHOOK_COMMIT_WAIT_SECONDS. Seeing the commit lets the push go out right
+    away instead of waiting for the next poll pass; a timeout logs a warning and still pushes
+    once (harmless if nothing is ahead) so the poll pass remains the eventual backstop either
+    way. Note mode has nothing else to do once process_meeting returns.
     """
     store = StateStore(cfg.state_dir / "state.json")
     result = PassResult()
@@ -238,10 +244,26 @@ async def process_event_meeting(cfg: Config, meeting: Meeting) -> PassResult:
 
     if cfg.bridge_mode == "graph" and not cfg.dry_run:
         if result.uploaded > 0:
+            base: str | None = None
+            try:
+                base = await git_head(cfg)
+            except Exception as exc:
+                log.warning("git HEAD check before the agent run failed (waiting for any commit): %s", exc)
             try:
                 await trigger_routine_now(cfg)
             except Exception as exc:
                 log.warning("immediate routine run failed (the cron picks it up): %s", exc)
+            seen = await wait_for_commit(
+                cfg,
+                base,
+                timeout_seconds=cfg.webhook_commit_wait_seconds,
+                interval_seconds=cfg.webhook_commit_poll_seconds,
+            )
+            if not seen:
+                log.warning(
+                    "agent commit not seen within %s s; the poll pass pushes it later",
+                    cfg.webhook_commit_wait_seconds,
+                )
         try:
             await push_if_ahead(cfg)
         except Exception as exc:

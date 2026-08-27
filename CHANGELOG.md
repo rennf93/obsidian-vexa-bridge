@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-27
+
+### Changed
+- The event path now pushes the agent's commit as soon as it lands instead of waiting for the next poll pass: `process_event_meeting` (graph mode, after an upload) records the workspace's HEAD sha, triggers the fold, then polls `GET /agent/workspace/git` for a new commit (`WEBHOOK_COMMIT_WAIT_SECONDS`, default `600`, interval `WEBHOOK_COMMIT_POLL_SECONDS`, default `15`) before pushing; a timeout logs a warning and still pushes once, so the poll pass remains the eventual backstop. `summarizer/agent_api.py` gains `git_head`; `summarizer/graph.py` gains `wait_for_commit`.
+
 ## [0.3.0] - 2026-08-27
 
 ### Added

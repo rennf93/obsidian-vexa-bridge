@@ -229,3 +229,89 @@ def test_pull_vault_reports_missing_git_without_raising(tmp_path, caplog):
     with caplog.at_level("ERROR", logger="vexa-summarizer"):
         assert graph.pull_vault(_cfg(tmp_path), run=fake_run) is False
     assert "git" in caplog.text
+
+
+# --- wait_for_commit -----------------------------------------------------
+
+
+async def _fake_sleep(seconds):
+    pass
+
+
+async def test_wait_for_commit_returns_true_when_sha_changes(monkeypatch):
+    heads = iter(["base", "base", "new"])
+
+    async def fake_head(cfg):
+        return next(heads)
+
+    monkeypatch.setattr(agent_api, "git_head", fake_head)
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    result = await graph.wait_for_commit(_cfg(), "base", timeout_seconds=60, interval_seconds=10, sleep=fake_sleep)
+    assert result is True
+    assert sleeps == [10, 10]
+
+
+async def test_wait_for_commit_treats_none_base_as_any_commit(monkeypatch):
+    heads = iter([None, "abc"])
+
+    async def fake_head(cfg):
+        return next(heads)
+
+    monkeypatch.setattr(agent_api, "git_head", fake_head)
+    result = await graph.wait_for_commit(_cfg(), None, timeout_seconds=60, interval_seconds=15, sleep=_fake_sleep)
+    assert result is True
+
+
+async def test_wait_for_commit_returns_false_on_timeout(monkeypatch):
+    async def fake_head(cfg):
+        return "base"
+
+    monkeypatch.setattr(agent_api, "git_head", fake_head)
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    result = await graph.wait_for_commit(_cfg(), "base", timeout_seconds=30, interval_seconds=10, sleep=fake_sleep)
+    assert result is False
+    assert sleeps == [10, 10, 10]
+
+
+async def test_wait_for_commit_zero_timeout_returns_immediately(monkeypatch):
+    async def fake_head(cfg):
+        return "base"
+
+    monkeypatch.setattr(agent_api, "git_head", fake_head)
+    assert await graph.wait_for_commit(_cfg(), "base", timeout_seconds=0) is False
+
+
+async def test_wait_for_commit_treats_api_errors_as_no_change_and_keeps_polling(monkeypatch):
+    calls = {"n": 0}
+
+    async def fake_head(cfg):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise agent_api.AgentApiError("GET /agent/workspace/git -> HTTP 502", 502)
+        return "new"
+
+    monkeypatch.setattr(agent_api, "git_head", fake_head)
+    result = await graph.wait_for_commit(_cfg(), "base", timeout_seconds=60, interval_seconds=10, sleep=_fake_sleep)
+    assert result is True
+    assert calls["n"] == 3
+
+
+async def test_wait_for_commit_logs_info_when_commit_seen(monkeypatch, caplog):
+    heads = iter(["base", "new"])
+
+    async def fake_head(cfg):
+        return next(heads)
+
+    monkeypatch.setattr(agent_api, "git_head", fake_head)
+    with caplog.at_level("INFO", logger="vexa-summarizer"):
+        result = await graph.wait_for_commit(_cfg(), "base", timeout_seconds=60, interval_seconds=10, sleep=_fake_sleep)
+    assert result is True
+    assert "commit" in caplog.text

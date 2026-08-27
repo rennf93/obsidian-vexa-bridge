@@ -15,10 +15,11 @@ summarizer.agent_api so tests fake one seam.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import subprocess
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from summarizer import agent_api
@@ -109,6 +110,35 @@ async def push_if_ahead(cfg: Config) -> bool:
     out = await agent_api.push(cfg)
     log.info("pushed workspace %s -> %s", out.get("branch"), out.get("head_sha"))
     return True
+
+
+async def wait_for_commit(
+    cfg: Config,
+    base_sha: str | None,
+    *,
+    timeout_seconds: float,
+    interval_seconds: float = 15.0,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> bool:
+    """Poll agent_api.git_head until it reports a sha different from base_sha (a None base counts
+    as "any commit"), so the event path's push can follow the agent's commit instead of waiting
+    for the next poll pass. An API error mid-poll (Vexa briefly unreachable) is logged and treated
+    as "no change yet" rather than raised -- the caller falls back to the poll pass either way on
+    a real timeout. sleep is injectable so tests don't wait in real time."""
+    elapsed = 0.0
+    while True:
+        try:
+            head = await agent_api.git_head(cfg)
+        except Exception as exc:
+            log.debug("git_head check failed while waiting for the agent commit (retrying): %s", exc)
+        else:
+            if head is not None and head != base_sha:
+                log.info("agent commit %s landed after %.0fs", head, elapsed)
+                return True
+        if elapsed >= timeout_seconds:
+            return False
+        await sleep(min(interval_seconds, timeout_seconds - elapsed))
+        elapsed += interval_seconds
 
 
 def pull_vault(cfg: Config, run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run) -> bool:

@@ -64,7 +64,7 @@ The summarization is provider-agnostic: any OpenAI-compatible `/v1` endpoint wor
 
 ## Events
 
-Alongside the poll, the bridge can receive Vexa's signed `meeting.completed` webhook and process that meeting immediately instead of waiting for the next tick. The poll stays the fallback either way: it is what eventually processes a meeting whose event never arrived, or arrived before its transcript was fully flushed (`WEBHOOK_DELAY_SECONDS` gives Vexa a moment to finish writing before the bridge fetches the transcript; a still-short transcript at that point is left for the poll instead of being marked skipped). Both `BRIDGE_MODE=note` and `BRIDGE_MODE=graph` support the webhook.
+Alongside the poll, the bridge can receive Vexa's signed `meeting.completed` webhook and process that meeting immediately instead of waiting for the next tick. The poll stays the fallback either way: it is what eventually processes a meeting whose event never arrived, or arrived before its transcript was fully flushed (`WEBHOOK_DELAY_SECONDS` gives Vexa a moment to finish writing before the bridge fetches the transcript; a still-short transcript at that point is left for the poll instead of being marked skipped). Both `BRIDGE_MODE=note` and `BRIDGE_MODE=graph` support the webhook. In graph mode, once a webhook upload triggers the fold, the bridge waits for the agent's commit and pushes it right away, instead of leaving it for the next poll pass.
 
 Set `WEBHOOK_ENABLED=true` and `WEBHOOK_SECRET` to start the receiver (an aiohttp server on `WEBHOOK_HOST:WEBHOOK_PORT`, default `0.0.0.0:8080`, at `WEBHOOK_PATH`, default `/webhook`); set `WEBHOOK_PUBLIC_URL` to have the bridge register that URL with Vexa automatically at startup (`PUT /user/webhook`).
 
@@ -77,6 +77,8 @@ Set `WEBHOOK_ENABLED=true` and `WEBHOOK_SECRET` to start the receiver (an aiohtt
 | `WEBHOOK_PATH` | never | `/webhook` | Route the receiver listens on. |
 | `WEBHOOK_PUBLIC_URL` | never | - | When set, the bridge registers this URL with Vexa (`PUT /user/webhook`) at startup. |
 | `WEBHOOK_DELAY_SECONDS` | never | `20` | Wait this long after the event before fetching the transcript. |
+| `WEBHOOK_COMMIT_WAIT_SECONDS` | never | `600` | `BRIDGE_MODE=graph` only. Wait up to this long for the agent's commit before giving up and letting the next poll pass push it. |
+| `WEBHOOK_COMMIT_POLL_SECONDS` | never | `15` | `BRIDGE_MODE=graph` only. Interval between checks while waiting for the agent's commit. |
 
 Discord meetings that [`discord-vexa-bridge`](https://github.com/rennf93/discord-vexa-bridge) writes straight into Vexa's Postgres don't go through Vexa's own webhook delivery; that sibling bridge emits the same envelope shape itself for the meetings it writes, so this receiver accepts events from either source.
 
