@@ -227,3 +227,65 @@ def test_default_mode_is_note_and_unchanged():
     cfg = config.load_config({"VEXA_API_URL": "http://v", "VEXA_API_KEY": "k", "VAULT_DIR": "/vault"})
     assert cfg.bridge_mode == "note"
     assert cfg.obsidian_sink == "fs"
+
+
+# --- webhook receiver ---------------------------------------------------
+
+
+def test_webhook_disabled_by_default():
+    cfg = config.load_config(_base_env())
+    assert cfg.webhook_enabled is False
+    assert cfg.webhook_secret is None
+    assert cfg.webhook_host == "0.0.0.0"
+    assert cfg.webhook_port == 8080
+    assert cfg.webhook_path == "/webhook"
+    assert cfg.webhook_public_url is None
+    assert cfg.webhook_delay_seconds == 20.0
+
+
+def test_webhook_enabled_requires_secret():
+    env = _base_env()
+    env["WEBHOOK_ENABLED"] = "true"
+    with pytest.raises(config.ConfigError, match="WEBHOOK_SECRET"):
+        config.load_config(env)
+
+
+def test_webhook_enabled_reads_all_fields():
+    env = _base_env()
+    env["WEBHOOK_ENABLED"] = "true"
+    env["WEBHOOK_SECRET"] = "s3cr3t"
+    env["WEBHOOK_HOST"] = "127.0.0.1"
+    env["WEBHOOK_PORT"] = "9090"
+    env["WEBHOOK_PATH"] = "/hooks/vexa"
+    env["WEBHOOK_PUBLIC_URL"] = "http://bridge:9090/hooks/vexa"
+    env["WEBHOOK_DELAY_SECONDS"] = "5"
+    cfg = config.load_config(env)
+    assert cfg.webhook_enabled is True
+    assert cfg.webhook_secret == "s3cr3t"
+    assert cfg.webhook_host == "127.0.0.1"
+    assert cfg.webhook_port == 9090
+    assert cfg.webhook_path == "/hooks/vexa"
+    assert cfg.webhook_public_url == "http://bridge:9090/hooks/vexa"
+    assert cfg.webhook_delay_seconds == 5.0
+
+
+def test_webhook_disabled_does_not_require_secret():
+    env = _base_env()
+    env["WEBHOOK_ENABLED"] = "false"
+    cfg = config.load_config(env)  # must not raise
+    assert cfg.webhook_enabled is False
+
+
+def test_webhook_supported_in_graph_mode():
+    cfg = config.load_config(
+        {
+            "BRIDGE_MODE": "graph",
+            "VEXA_API_URL": "http://v",
+            "VEXA_API_KEY": "k",
+            "WEBHOOK_ENABLED": "true",
+            "WEBHOOK_SECRET": "s",
+        }
+    )
+    assert cfg.bridge_mode == "graph"
+    assert cfg.webhook_enabled is True
+    assert cfg.webhook_secret == "s"

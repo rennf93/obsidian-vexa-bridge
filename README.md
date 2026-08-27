@@ -62,6 +62,26 @@ The summarization is provider-agnostic: any OpenAI-compatible `/v1` endpoint wor
 
 ---
 
+## Events
+
+Alongside the poll, the bridge can receive Vexa's signed `meeting.completed` webhook and process that meeting immediately instead of waiting for the next tick. The poll stays the fallback either way: it is what eventually processes a meeting whose event never arrived, or arrived before its transcript was fully flushed (`WEBHOOK_DELAY_SECONDS` gives Vexa a moment to finish writing before the bridge fetches the transcript; a still-short transcript at that point is left for the poll instead of being marked skipped). Both `BRIDGE_MODE=note` and `BRIDGE_MODE=graph` support the webhook.
+
+Set `WEBHOOK_ENABLED=true` and `WEBHOOK_SECRET` to start the receiver (an aiohttp server on `WEBHOOK_HOST:WEBHOOK_PORT`, default `0.0.0.0:8080`, at `WEBHOOK_PATH`, default `/webhook`); set `WEBHOOK_PUBLIC_URL` to have the bridge register that URL with Vexa automatically at startup (`PUT /user/webhook`).
+
+| Variable | Required when | Default | Description |
+|---|---|---|---|
+| `WEBHOOK_ENABLED` | never | `false` | Start the event-driven receiver alongside the poll. |
+| `WEBHOOK_SECRET` | `WEBHOOK_ENABLED=true` | - | Shared secret used to verify `X-Webhook-Signature` (and the legacy `Authorization: Bearer`). |
+| `WEBHOOK_HOST` | never | `0.0.0.0` | Bind address for the receiver. |
+| `WEBHOOK_PORT` | never | `8080` | Bind port for the receiver. |
+| `WEBHOOK_PATH` | never | `/webhook` | Route the receiver listens on. |
+| `WEBHOOK_PUBLIC_URL` | never | - | When set, the bridge registers this URL with Vexa (`PUT /user/webhook`) at startup. |
+| `WEBHOOK_DELAY_SECONDS` | never | `20` | Wait this long after the event before fetching the transcript. |
+
+Discord meetings that [`discord-vexa-bridge`](https://github.com/rennf93/discord-vexa-bridge) writes straight into Vexa's Postgres don't go through Vexa's own webhook delivery; that sibling bridge emits the same envelope shape itself for the meetings it writes, so this receiver accepts events from either source.
+
+---
+
 ## Run model
 
 The container is a **long-running poll loop**, not a cron job. On startup it loads `summarizer/config.py` from env, then repeats: one pass (`run_once`) → sleep `POLL_INTERVAL_SECONDS` (default 180) → repeat. A `SIGTERM` (`docker stop`) cancels the loop cleanly between passes — no mid-pass corruption, because `mark_done` is the only commit and it runs last. `--once` (or `ONCE=1`) runs a single pass and exits, for validation, `DRY_RUN` first-runs, and manual reruns.

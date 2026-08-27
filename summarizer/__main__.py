@@ -18,12 +18,20 @@ In BRIDGE_MODE=graph the summarize and sink steps are replaced by an upload of t
 into the Vexa agent workspace (see summarizer/graph.py); once something is uploaded the bridge
 triggers an immediate run of the fold routine, then the pass ends with a push of the workspace
 and, when VAULT_DIR is set, a fast-forward pull of the vault folder.
+
+WEBHOOK_ENABLED=true starts a second, event-driven path alongside the poll: an aiohttp server
+(summarizer/webhook.py) that receives Vexa's meeting.completed webhook (and the same envelope
+shape emitted by discord-vexa-bridge) and processes that meeting immediately via
+process_event_meeting, instead of waiting up to POLL_INTERVAL_SECONDS. The poll stays the
+fallback either way -- it is what eventually processes a meeting whose event never arrived or
+arrived before its transcript was fully flushed. --once never starts the webhook server.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import os
 import signal
@@ -46,6 +54,7 @@ from summarizer.obsidian import assemble_note, create_note, note_path, write_not
 from summarizer.state import StateStore
 from summarizer.types import Meeting, MeetingMeta, Utterance
 from summarizer.vexa import get_transcript, list_completed_meetings, write_notes
+from summarizer.webhook import register_with_vexa, serve
 
 log = logging.getLogger("vexa-summarizer")
 
@@ -78,6 +87,77 @@ def _meta_from(meeting: Meeting, utts: list[Utterance], duration: float) -> Meet
     )
 
 
+async def process_meeting(
+    cfg: Config,
+    store: StateStore,
+    meeting: Meeting,
+    result: PassResult,
+    *,
+    mark_low_transcript: bool = True,
+) -> None:
+    """Process one meeting: done/poisoned check, transcript fetch, min-duration gate, then
+    mode-specific handling (note: summarize + sink + notes + mark_done; graph: render + upload
+    + mark_done). Shared by run_once's loop, _run_once_graph's loop, and the webhook path
+    (process_event_meeting) so there is exactly one place that owns per-meeting error handling.
+
+    mark_low_transcript=False skips mark_skipped on the min-duration gate: used by the webhook
+    path, where an event can fire before Vexa's last transcript flush lands, so a meeting must
+    stay eligible for the next poll rather than being permanently marked skipped.
+    """
+    key = meeting.id
+    if store.is_done(key) or store.is_poisoned(key):
+        result.idle += 1
+        return
+    try:
+        utts = await get_transcript(cfg, meeting)
+        duration = sum(u.end_time - u.start_time for u in utts)
+        if duration < cfg.min_transcript_seconds:
+            if mark_low_transcript:
+                store.mark_skipped(key, "low-transcript")
+            result.skipped += 1
+            log.info("meeting %s skipped: %.1fs < %.1fs min", key, duration, cfg.min_transcript_seconds)
+            return
+
+        meta = _meta_from(meeting, utts, duration)
+
+        if cfg.bridge_mode == "graph":
+            filename = transcript_filename(meta)
+            content = render_transcript(meta, utts)
+            if cfg.dry_run:
+                result.uploaded += 1
+                log.info("[DRY_RUN] meeting %s -> would upload %s", key, filename)
+                return
+            uploaded_path = await upload(cfg, filename, content)
+            store.mark_done(key, uploaded_path)
+            result.uploaded += 1
+            log.info("meeting %s uploaded -> %s", key, uploaded_path)
+            return
+
+        summary_md = await summarize(utts, meta, cfg)
+        note_md = assemble_note(meta, summary_md, utts, cfg)
+        path = note_path(meeting, meta.participants, cfg) if cfg.obsidian_enabled else None
+
+        if cfg.dry_run:
+            result.summarized += 1
+            log.info("[DRY_RUN] meeting %s -> would write %s", key, path)
+            return
+
+        if cfg.obsidian_enabled:
+            if cfg.obsidian_sink == "fs":
+                await write_note_fs(cfg, path, note_md)  # type: ignore[arg-type]
+            else:
+                await create_note(cfg, path, note_md)  # type: ignore[arg-type]
+        if cfg.vexa_notes_enabled:
+            await write_notes(cfg, meeting, note_md)
+        store.mark_done(key, path)
+        result.summarized += 1
+        log.info("meeting %s summarized -> %s", key, path)
+    except Exception as exc:
+        store.record_failure(key)
+        result.failed += 1
+        log.warning("meeting %s failed: %s", key, exc)
+
+
 async def run_once(cfg: Config) -> PassResult:
     if not cfg.summarize_enabled:
         log.info("SUMMARIZE_ENABLED=false; skipping pass")
@@ -96,43 +176,7 @@ async def run_once(cfg: Config) -> PassResult:
         return await _run_once_graph(cfg, store, meetings)
 
     for meeting in meetings:
-        key = meeting.id
-        if store.is_done(key) or store.is_poisoned(key):
-            result.idle += 1
-            continue
-        try:
-            utts = await get_transcript(cfg, meeting)
-            duration = sum(u.end_time - u.start_time for u in utts)
-            if duration < cfg.min_transcript_seconds:
-                store.mark_skipped(key, "low-transcript")
-                result.skipped += 1
-                log.info("meeting %s skipped: %.1fs < %.1fs min", key, duration, cfg.min_transcript_seconds)
-                continue
-
-            meta = _meta_from(meeting, utts, duration)
-            summary_md = await summarize(utts, meta, cfg)
-            note_md = assemble_note(meta, summary_md, utts, cfg)
-            path = note_path(meeting, meta.participants, cfg) if cfg.obsidian_enabled else None
-
-            if cfg.dry_run:
-                result.summarized += 1
-                log.info("[DRY_RUN] meeting %s -> would write %s", key, path)
-                continue
-
-            if cfg.obsidian_enabled:
-                if cfg.obsidian_sink == "fs":
-                    await write_note_fs(cfg, path, note_md)  # type: ignore[arg-type]
-                else:
-                    await create_note(cfg, path, note_md)  # type: ignore[arg-type]
-            if cfg.vexa_notes_enabled:
-                await write_notes(cfg, meeting, note_md)
-            store.mark_done(key, path)
-            result.summarized += 1
-            log.info("meeting %s summarized -> %s", key, path)
-        except Exception as exc:
-            store.record_failure(key)
-            result.failed += 1
-            log.warning("meeting %s failed: %s", key, exc)
+        await process_meeting(cfg, store, meeting, result)
 
     return result
 
@@ -163,33 +207,7 @@ async def _run_once_graph(cfg: Config, store: StateStore, meetings: list[Meeting
             _routine_ready = True
 
     for meeting in meetings:
-        key = meeting.id
-        if store.is_done(key) or store.is_poisoned(key):
-            result.idle += 1
-            continue
-        try:
-            utts = await get_transcript(cfg, meeting)
-            duration = sum(u.end_time - u.start_time for u in utts)
-            if duration < cfg.min_transcript_seconds:
-                store.mark_skipped(key, "low-transcript")
-                result.skipped += 1
-                log.info("meeting %s skipped: %.1fs < %.1fs min", key, duration, cfg.min_transcript_seconds)
-                continue
-            meta = _meta_from(meeting, utts, duration)
-            filename = transcript_filename(meta)
-            content = render_transcript(meta, utts)
-            if cfg.dry_run:
-                result.uploaded += 1
-                log.info("[DRY_RUN] meeting %s -> would upload %s", key, filename)
-                continue
-            path = await upload(cfg, filename, content)
-            store.mark_done(key, path)
-            result.uploaded += 1
-            log.info("meeting %s uploaded -> %s", key, path)
-        except Exception as exc:
-            store.record_failure(key)
-            result.failed += 1
-            log.warning("meeting %s failed: %s", key, exc)
+        await process_meeting(cfg, store, meeting, result)
 
     if not cfg.dry_run:
         if result.uploaded > 0:
@@ -205,12 +223,44 @@ async def _run_once_graph(cfg: Config, store: StateStore, meetings: list[Meeting
     return result
 
 
+async def process_event_meeting(cfg: Config, meeting: Meeting) -> PassResult:
+    """Process one meeting delivered by a meeting.completed webhook, outside the poll loop.
+
+    mark_low_transcript=False: the event can fire before Vexa's last transcript flush, so a
+    below-minimum transcript is left for the next poll instead of being permanently skipped.
+    In graph mode this also runs the same best-effort post-steps as a pass that uploaded
+    something (trigger_routine_now, push_if_ahead, pull_vault); note mode has nothing else to
+    do once process_meeting returns.
+    """
+    store = StateStore(cfg.state_dir / "state.json")
+    result = PassResult()
+    await process_meeting(cfg, store, meeting, result, mark_low_transcript=False)
+
+    if cfg.bridge_mode == "graph" and not cfg.dry_run:
+        if result.uploaded > 0:
+            try:
+                await trigger_routine_now(cfg)
+            except Exception as exc:
+                log.warning("immediate routine run failed (the cron picks it up): %s", exc)
+        try:
+            await push_if_ahead(cfg)
+        except Exception as exc:
+            log.warning("workspace push failed (resolve on the repo or via /agent/workspace/pull): %s", exc)
+        pull_vault(cfg)
+
+    return result
+
+
 async def _loop(cfg: Config) -> None:
     """Run run_once on a fixed interval until SIGTERM (docker stop) cancels the sleep.
 
     Resilient: a run_once exception is caught and logged (run_once already catches per-meeting,
     but we guard the whole pass so the loop never dies). mark_done is the only commit, so a
     SIGTERM mid-pass either completes the pass or leaves it undone — never half-committed.
+
+    WEBHOOK_ENABLED=true also starts the webhook receiver here (never under --once): it runs
+    alongside the poll as a background task, and WEBHOOK_PUBLIC_URL (when set) registers it with
+    Vexa once at startup, best-effort -- a failure there is logged and the poll still runs.
     """
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -220,24 +270,43 @@ async def _loop(cfg: Config) -> None:
         # Windows / non-Unix loops — no SIGTERM handler; loop runs until process kill.
         pass
 
-    while not stop.is_set():
-        try:
-            result = await run_once(cfg)
-        except Exception as exc:  # run_once is defensive, but never kill the loop
-            log.warning("run_once crashed: %s", exc)
-        else:
-            log.info(
-                "pass complete: %d summarized, %d uploaded, %d skipped, %d failed, %d idle",
-                result.summarized,
-                result.uploaded,
-                result.skipped,
-                result.failed,
-                result.idle,
-            )
-        try:
-            await asyncio.wait_for(stop.wait(), timeout=cfg.poll_interval_seconds)
-        except TimeoutError:
-            pass  # interval elapsed — loop again
+    server_task: asyncio.Task[None] | None = None
+    if cfg.webhook_enabled:
+        if cfg.webhook_public_url:
+            try:
+                await register_with_vexa(cfg)
+            except Exception as exc:
+                log.warning("webhook registration with Vexa failed (register it manually, or retry later): %s", exc)
+
+        async def _event_handler(meeting: Meeting) -> None:
+            await process_event_meeting(cfg, meeting)
+
+        server_task = asyncio.create_task(serve(cfg, _event_handler))
+
+    try:
+        while not stop.is_set():
+            try:
+                result = await run_once(cfg)
+            except Exception as exc:  # run_once is defensive, but never kill the loop
+                log.warning("run_once crashed: %s", exc)
+            else:
+                log.info(
+                    "pass complete: %d summarized, %d uploaded, %d skipped, %d failed, %d idle",
+                    result.summarized,
+                    result.uploaded,
+                    result.skipped,
+                    result.failed,
+                    result.idle,
+                )
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=cfg.poll_interval_seconds)
+            except TimeoutError:
+                pass  # interval elapsed — loop again
+    finally:
+        if server_task is not None:
+            server_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await server_task
 
     log.info("received SIGTERM; exiting")
 

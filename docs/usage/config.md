@@ -49,6 +49,20 @@ These vars only matter when `BRIDGE_MODE=graph`. In graph mode `AI_*`, `OBSIDIAN
 | `POLL_INTERVAL_SECONDS` | never | `180` | Seconds between passes. |
 | `ONCE` | never | - | `1`/`true` runs a single pass and exits — validation, `DRY_RUN` first-runs, manual reruns. |
 
+## Webhook receiver
+
+An event-driven alternative to the poll, supported by both `BRIDGE_MODE=note` and `BRIDGE_MODE=graph`; the poll stays the fallback either way. See [Events](../../README.md#events) for the full picture.
+
+| Variable | Required when | Default | Description |
+|---|---|---|---|
+| `WEBHOOK_ENABLED` | never | `false` | Start the event-driven receiver alongside the poll. |
+| `WEBHOOK_SECRET` | `WEBHOOK_ENABLED=true` | - | Shared secret used to verify `X-Webhook-Signature` (and the legacy `Authorization: Bearer`). |
+| `WEBHOOK_HOST` | never | `0.0.0.0` | Bind address for the receiver. |
+| `WEBHOOK_PORT` | never | `8080` | Bind port for the receiver. |
+| `WEBHOOK_PATH` | never | `/webhook` | Route the receiver listens on. |
+| `WEBHOOK_PUBLIC_URL` | never | - | When set, the bridge registers this URL with Vexa (`PUT /user/webhook`) at startup. |
+| `WEBHOOK_DELAY_SECONDS` | never | `20` | Wait this long after the event before fetching the transcript, since Vexa's completed transition can precede the last transcript flush. |
+
 ## Behavior knobs
 
 - `mark_done` is the only commit and runs last; a crash mid-pass leaves the meeting un-marked, so the next pass redoes it.
