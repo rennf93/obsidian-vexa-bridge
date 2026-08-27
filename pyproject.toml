@@ -1,6 +1,6 @@
 [project]
 name = "obsidian-vexa-bridge"
-version = "0.1.1"
+version = "0.2.0"
 description = "Sink adapter: summarize completed Vexa meetings into Obsidian notes (LLM via OpenAI-compatible endpoint, filesystem/MCP sinks)."
 readme = "README.md"
 license = "AGPL-3.0-or-later"
