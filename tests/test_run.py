@@ -237,3 +237,180 @@ async def test_run_once_fs_sink_routes_to_write_note_fs(tmp_path, monkeypatch):
     from summarizer.state import StateStore
 
     assert StateStore(tmp_path / "state.json").is_done(7) is True
+
+
+def _graph_cfg(tmp_path, dry_run=False, vault=False):
+    cfg = config.Config(
+        bridge_mode="graph",
+        vexa_api_url="http://vexa:8056",
+        vexa_api_key="k",
+        min_transcript_seconds=30.0,
+        dry_run=dry_run,
+        state_dir=tmp_path,
+    )
+    if vault:
+        cfg.vault_dir = tmp_path
+    return cfg
+
+
+def _patch_graph(monkeypatch, meetings, utts=None, upload_fn=None, ensure_fn=None, push_fn=None, pull_fn=None):
+    async def fake_list(cfg, platforms):
+        return meetings
+
+    async def fake_transcript(cfg, meeting):
+        return utts if utts is not None else _utts()
+
+    async def fake_upload(cfg, filename, content):
+        if upload_fn is not None:
+            return await upload_fn(cfg, filename, content)
+        return f"uploads/abc-{filename}"
+
+    async def fake_ensure(cfg):
+        if ensure_fn is not None:
+            return await ensure_fn(cfg)
+        return True
+
+    async def fake_push(cfg):
+        if push_fn is not None:
+            return await push_fn(cfg)
+        return False
+
+    def fake_pull(cfg, run=None):
+        if pull_fn is not None:
+            return pull_fn(cfg)
+        return False
+
+    async def must_not_summarize(*a, **k):
+        raise AssertionError("graph mode must not call the LLM")
+
+    monkeypatch.setattr(m, "list_completed_meetings", fake_list)
+    monkeypatch.setattr(m, "get_transcript", fake_transcript)
+    monkeypatch.setattr(m, "upload", fake_upload)
+    monkeypatch.setattr(m, "ensure_routine", fake_ensure)
+    monkeypatch.setattr(m, "push_if_ahead", fake_push)
+    monkeypatch.setattr(m, "pull_vault", fake_pull)
+    monkeypatch.setattr(m, "summarize", must_not_summarize)
+
+
+async def test_graph_mode_uploads_transcript_and_marks_done(tmp_path, monkeypatch):
+    uploads = []
+
+    async def upload(cfg, filename, content):
+        uploads.append((filename, content))
+        return "uploads/abc-" + filename
+
+    _patch_graph(monkeypatch, [_meeting()], upload_fn=upload)
+    result = await m.run_once(_graph_cfg(tmp_path))
+    assert result.uploaded == 1
+    filename, content = uploads[0]
+    assert filename == "2026-07-06-discord-d7.md"
+    assert "type: transcript" in content
+    assert "[00:00:00] David: We should ship it." in content
+    from summarizer.state import StateStore
+
+    store = StateStore(tmp_path / "state.json")
+    assert store.is_done(7) is True
+    assert store.get(7).note_path == "uploads/abc-2026-07-06-discord-d7.md"
+
+
+async def test_graph_mode_second_run_is_idle(tmp_path, monkeypatch):
+    uploads = []
+
+    async def upload(cfg, filename, content):
+        uploads.append(1)
+        return "uploads/x"
+
+    _patch_graph(monkeypatch, [_meeting()], upload_fn=upload)
+    await m.run_once(_graph_cfg(tmp_path))
+    result = await m.run_once(_graph_cfg(tmp_path))
+    assert result.idle == 1
+    assert uploads == [1]
+
+
+async def test_graph_mode_upload_failure_records_failure_not_done(tmp_path, monkeypatch):
+    from summarizer.agent_api import AgentApiError
+
+    async def upload(cfg, filename, content):
+        raise AgentApiError("POST upload -> HTTP 502", 502)
+
+    _patch_graph(monkeypatch, [_meeting()], upload_fn=upload)
+    result = await m.run_once(_graph_cfg(tmp_path))
+    assert result.failed == 1
+    from summarizer.state import StateStore
+
+    assert StateStore(tmp_path / "state.json").is_done(7) is False
+
+
+async def test_graph_mode_low_transcript_is_skipped(tmp_path, monkeypatch):
+    uploads = []
+
+    async def upload(cfg, filename, content):
+        uploads.append(1)
+        return "uploads/x"
+
+    _patch_graph(monkeypatch, [_meeting()], utts=[Utterance("David", 0.0, 5.0, "hi")], upload_fn=upload)
+    result = await m.run_once(_graph_cfg(tmp_path))
+    assert result.skipped == 1
+    assert uploads == []
+
+
+async def test_graph_mode_dry_run_uploads_nothing(tmp_path, monkeypatch):
+    uploads = []
+
+    async def upload(cfg, filename, content):
+        uploads.append(1)
+        return "uploads/x"
+
+    _patch_graph(monkeypatch, [_meeting()], upload_fn=upload)
+    result = await m.run_once(_graph_cfg(tmp_path, dry_run=True))
+    assert result.uploaded == 1
+    assert uploads == []
+    from summarizer.state import StateStore
+
+    assert StateStore(tmp_path / "state.json").is_done(7) is False
+
+
+async def test_graph_mode_ensures_routine_pushes_and_pulls_each_pass(tmp_path, monkeypatch):
+    order = []
+
+    async def ensure(cfg):
+        order.append("ensure")
+        return True
+
+    async def push(cfg):
+        order.append("push")
+        return True
+
+    def pull(cfg):
+        order.append("pull")
+        return True
+
+    _patch_graph(monkeypatch, [], ensure_fn=ensure, push_fn=push, pull_fn=pull)
+    await m.run_once(_graph_cfg(tmp_path, vault=True))
+    assert order == ["ensure", "push", "pull"]
+
+
+async def test_graph_mode_routine_501_is_logged_and_uploads_continue(tmp_path, monkeypatch, caplog):
+    from summarizer.agent_api import AgentApiError
+
+    async def ensure(cfg):
+        raise AgentApiError("POST /agent/routines -> HTTP 501", 501)
+
+    _patch_graph(monkeypatch, [_meeting()], ensure_fn=ensure)
+    with caplog.at_level("WARNING", logger="vexa-summarizer"):
+        result = await m.run_once(_graph_cfg(tmp_path))
+    assert result.uploaded == 1
+    assert "routine" in caplog.text
+
+
+async def test_graph_mode_push_error_is_logged_not_raised(tmp_path, monkeypatch, caplog):
+    from summarizer.agent_api import AgentApiError
+
+    async def push(cfg):
+        raise AgentApiError("POST /agent/workspace/push -> HTTP 502: diverged", 502)
+
+    _patch_graph(monkeypatch, [], push_fn=push)
+    with caplog.at_level("WARNING", logger="vexa-summarizer"):
+        result = await m.run_once(_graph_cfg(tmp_path))
+    assert result.failed == 0
+    assert "push" in caplog.text
