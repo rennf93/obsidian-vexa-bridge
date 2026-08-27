@@ -7,13 +7,25 @@ All vars come from `summarizer/config.py`. "Required when" is conditional — th
 | Variable | Required when | Default | Description |
 |---|---|---|---|
 | `SUMMARIZE_ENABLED` | never | `true` | Master switch. `false` short-circuits the whole pass; no other var is enforced. |
+| `BRIDGE_MODE` | never | `note` | `note` (LLM summary note per meeting, this section applies) or `graph` (upload transcripts into your Vexa agent workspace, no LLM in the bridge; see [Graph mode](#graph-mode) below). |
 | `AI_MODEL` | `SUMMARIZE_ENABLED=true` | `anthropic/claude-sonnet-5` | LiteLLM model id, e.g. `openai/qwen2.5:7b` for ollama, `anthropic/claude-sonnet-5` for Anthropic. |
 | `AI_API_KEY` | `SUMMARIZE_ENABLED=true` (`not-needed` for local ollama) | - | API key for the LLM provider. ollama ignores it; LiteLLM requires a value, so set `not-needed`. |
 | `AI_BASE_URL` | `SUMMARIZE_ENABLED=true` | - | OpenAI-compatible base URL. On the NAS: `http://ollama:11434/v1`. |
 | `VEXA_API_URL` | `SUMMARIZE_ENABLED=true` | - | Vexa api-gateway URL, e.g. `http://api-gateway:8000` in-stack. |
 | `VEXA_API_KEY` | `SUMMARIZE_ENABLED=true` | - | Per-user Vexa API token (scope `tx`), minted once via `scripts/mint_token.sh`. Not the admin token. |
+| `VEXA_DATABASE_URL` | never | - | Direct-Postgres connection string, used in both modes as a fallback when the gateway's transcript route rejects a platform (notably `discord`, whose rows `discord-vexa-bridge` writes straight into `transcriptions`). Unset by default; the gateway call is tried first either way. |
 | `SUMMARIZE_PLATFORMS` | never | `discord` | CSV of platforms to summarize, e.g. `discord,google_meet,zoom`. Zoom/Meet parity is this one var. |
 | `MIN_TRANSCRIPT_SECONDS` | never | `30` | Skip meetings with less than this much speech; skipped, not summarized. |
+
+## Graph mode
+
+These vars only matter when `BRIDGE_MODE=graph`. In graph mode `AI_*`, `OBSIDIAN_*`, `INCLUDE_TRANSCRIPT`, and `VEXA_NOTES_ENABLED` are ignored entirely (the agent on the Vexa side writes the graph, not this process), and `VAULT_DIR` becomes optional: set it when the bridge can also reach the vault directly, so it fast-forwards the mirror folder after each pass; leave it unset and the mirror only advances however the agent's own push reaches it.
+
+| Variable | Required when | Default | Description |
+|---|---|---|---|
+| `VEXA_VAULT_FOLDER` | never | `Vexa` | Name of the fast-forward mirror folder under `VAULT_DIR` that the bridge pulls after each pass. |
+| `GRAPH_ROUTINE_NAME` | never | `meeting-to-graph` | Name of the standing Vexa routine that folds `uploads/` into the knowledge graph. Created on the bridge's first pass if a routine with that name doesn't already exist. |
+| `GRAPH_ROUTINE_CRON` | never | `*/15 * * * *` | Cron schedule for that routine. |
 
 ## Obsidian sink
 
