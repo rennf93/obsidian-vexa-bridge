@@ -2,10 +2,10 @@
 `python -m summarizer` (or `python -m summarizer --once` for a single validation pass).
 
 Flow per pass: list Vexa completed meetings -> for each not done/poisoned -> fetch transcript
--> min-duration guard -> summarize -> enabled sinks (Obsidian note via fs or mcp, Vexa notes)
--> mark_done. mark_done is the only commit and runs last, so a crash mid-pass is harmless (next
-pass redoes it; the note sink's fail-if-exists is the backstop). Failures record_failure; after
-5 a meeting is poisoned and skipped until state.json is manually cleared.
+-> min-duration guard -> coverage guard -> summarize -> enabled sinks (Obsidian note via fs or
+mcp, Vexa notes) -> mark_done. mark_done is the only commit and runs last, so a crash mid-pass
+is harmless (next pass redoes it; the note sink's fail-if-exists is the backstop). Failures
+record_failure; after 5 a meeting is poisoned and skipped until state.json is manually cleared.
 
 The loop sleeps POLL_INTERVAL_SECONDS (default 180s) between passes. SIGTERM (docker stop)
 cancels the sleep and exits cleanly within the interval — no mid-pass corruption. --once (or
@@ -58,6 +58,11 @@ log = logging.getLogger("vexa-summarizer")
 
 _routine_ready: bool = False
 
+# Below this, a meeting is too short to judge speech-vs-wall-clock coverage: a 90s call that's
+# entirely a rejected upload looks identical to a 90s call with a slow start. Only meetings at
+# least this long get the coverage gate; short ones only face the min-duration gate above it.
+COVERAGE_GATE_MIN_WALL_CLOCK_SECONDS = 300.0
+
 
 @dataclass
 class PassResult:
@@ -93,14 +98,16 @@ async def process_meeting(
     *,
     mark_low_transcript: bool = True,
 ) -> None:
-    """Process one meeting: done/poisoned check, transcript fetch, min-duration gate, then
-    mode-specific handling (note: summarize + sink + notes + mark_done; graph: render + upload
-    + mark_done). Shared by run_once's loop, _run_once_graph's loop, and the webhook path
-    (process_event_meeting) so there is exactly one place that owns per-meeting error handling.
+    """Process one meeting: done/poisoned check, transcript fetch, min-duration gate,
+    coverage gate, then mode-specific handling (note: summarize + sink + notes + mark_done;
+    graph: render + upload + mark_done). Shared by run_once's loop, _run_once_graph's loop,
+    and the webhook path (process_event_meeting) so there is exactly one place that owns
+    per-meeting error handling.
 
-    mark_low_transcript=False skips mark_skipped on the min-duration gate: used by the webhook
-    path, where an event can fire before Vexa's last transcript flush lands, so a meeting must
-    stay eligible for the next poll rather than being permanently marked skipped.
+    mark_low_transcript=False skips mark_skipped on the min-duration and coverage gates: used
+    by the webhook path, where an event can fire before Vexa's last transcript flush lands, so
+    a meeting must stay eligible for the next poll rather than being permanently marked
+    skipped.
     """
     key = meeting.id
     if store.is_done(key) or store.is_poisoned(key):
@@ -108,13 +115,40 @@ async def process_meeting(
         return
     try:
         utts = await get_transcript(cfg, meeting)
-        duration = sum(u.end_time - u.start_time for u in utts)
+        # max(0.0, ...): belt and braces on top of vexa.get_transcript's own clamping, so one
+        # malformed row (end_time before its own start_time) can't drag the total negative.
+        duration = sum(max(0.0, u.end_time - u.start_time) for u in utts)
         if duration < cfg.min_transcript_seconds:
             if mark_low_transcript:
                 store.mark_skipped(key, "low-transcript")
             result.skipped += 1
             log.info("meeting %s skipped: %.1fs < %.1fs min", key, duration, cfg.min_transcript_seconds)
             return
+
+        # Speech seconds alone misses the case where Vexa's transcription worker rejected most
+        # of the audio (e.g. HTTP 503 under load): duration clears the min-seconds gate above
+        # even though the transcript covers a sliver of the actual call. Wall clock is only
+        # trustworthy once a meeting has run long enough to judge -- a short call is never
+        # gated on coverage.
+        wall_clock = (meeting.end - meeting.start).total_seconds()
+        if cfg.min_transcript_coverage > 0 and wall_clock >= COVERAGE_GATE_MIN_WALL_CLOCK_SECONDS:
+            # Discord gives each speaker their own audio stream, so utterances legitimately
+            # overlap and total speech can exceed wall clock; clamp at 1.0 rather than let
+            # overlap read as coverage above 100%.
+            coverage = min(duration / wall_clock, 1.0)
+            if coverage < cfg.min_transcript_coverage:
+                if mark_low_transcript:
+                    store.mark_skipped(key, "low-coverage")
+                result.skipped += 1
+                log.info(
+                    "meeting %s skipped: %.1fs speech / %.1fs wall clock = %.3f coverage < %.3f min",
+                    key,
+                    duration,
+                    wall_clock,
+                    coverage,
+                    cfg.min_transcript_coverage,
+                )
+                return
 
         meta = _meta_from(meeting, utts, duration)
 

@@ -48,7 +48,8 @@ Same pattern, opposite direction, separate repo + image + release cadence.
 ```
 Vexa (completed meetings, any platform)
   -> poll loop (POLL_INTERVAL_SECONDS) lists completed meetings per platform
-  -> skip already-done / poisoned (state.json) and below MIN_TRANSCRIPT_SECONDS
+  -> skip already-done / poisoned (state.json), below MIN_TRANSCRIPT_SECONDS, or below
+     MIN_TRANSCRIPT_COVERAGE for calls long enough to judge
   -> fetch transcript (speaker-tagged segments)
   -> summarize via OpenAI-compatible LLM (AI_MODEL / AI_BASE_URL / AI_API_KEY)
   -> assemble note (frontmatter + TL;DR + key points + action items + transcript)
@@ -104,6 +105,7 @@ All vars come from `summarizer/config.py`. "Required when" is conditional — th
 | `VEXA_API_KEY` | `SUMMARIZE_ENABLED=true` | - | Per-user Vexa API token (scope `tx`), minted once via `scripts/mint_token.sh`. Not the admin token. |
 | `SUMMARIZE_PLATFORMS` | never | `discord` | CSV of platforms to summarize, e.g. `discord,google_meet,zoom`. Zoom/Meet parity is this one var. |
 | `MIN_TRANSCRIPT_SECONDS` | never | `30` | Skip meetings with less than this much speech; skipped, not summarized. |
+| `MIN_TRANSCRIPT_COVERAGE` | never | `0.05` | Skip meetings (at least 300s wall clock) where speech seconds / wall-clock seconds falls below this ratio, e.g. Vexa's transcription worker rejected most of the audio. `0` disables the gate. |
 | `OBSIDIAN_ENABLED` | never | `true` | Write an Obsidian note per meeting. |
 | `OBSIDIAN_SINK` | `OBSIDIAN_ENABLED=true` | `fs` | Sink type: `fs` (filesystem, `VAULT_DIR`) or `mcp` (vault-as-mcp HTTP, `OBSIDIAN_MCP_URL`). |
 | `VAULT_DIR` | `OBSIDIAN_ENABLED=true` and `OBSIDIAN_SINK=fs` | - | Host folder bind-mounted into the container (e.g. `/vault`); Syncthing mirrors it into the Mac vault. No sane default in a container. |

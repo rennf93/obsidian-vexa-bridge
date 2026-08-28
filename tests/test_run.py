@@ -5,7 +5,7 @@ run_once is the one-pass orchestrator: list completed meetings -> for each not d
 record_failure on any exception). DRY_RUN skips sink writes + mark_done.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from summarizer import __main__ as m
 from summarizer import agent_api, config, graph
@@ -144,6 +144,148 @@ async def test_low_transcript_meeting_is_skipped_not_summarized(tmp_path, monkey
     from summarizer.state import StateStore
 
     assert StateStore(tmp_path / "state.json").is_done(7) is True  # skipped = done, not retried
+
+
+# --- coverage gate: speech seconds vs. wall clock -------------------------------------------
+
+
+def _meeting_with_wall_clock(seconds: float, mid=7, native="d7"):
+    start = datetime(2026, 7, 6, 13, 0, tzinfo=UTC)
+    return Meeting(
+        id=mid,
+        platform="discord",
+        native_meeting_id=native,
+        start=start,
+        end=start + timedelta(seconds=seconds),
+    )
+
+
+async def test_low_coverage_meeting_is_skipped_with_a_distinct_reason(tmp_path, monkeypatch):
+    """Vexa's transcription worker can reject most of a call's audio (e.g. HTTP 503 under
+    load); the meeting then clears the min-duration gate on the little speech it does have,
+    even though the transcript covers a sliver of the actual call."""
+    from summarizer.state import StateStore
+
+    calls = []
+    original = StateStore.mark_skipped
+
+    def spy(self, meeting_id, reason):
+        calls.append((meeting_id, reason))
+        return original(self, meeting_id, reason)
+
+    monkeypatch.setattr(StateStore, "mark_skipped", spy)
+
+    meeting = _meeting_with_wall_clock(1000.0)  # >= 300s floor
+    # _utts() default: 40s speech total -> 40/1000 = 0.04, under the default 0.05 coverage min.
+    summarized = []
+    _patch_clients(monkeypatch, [meeting], utts=_utts(), summarize_fn=lambda *a: summarized.append(1) or _GOOD_MD)
+    result = await m.run_once(_cfg(tmp_path))
+    assert result.skipped == 1
+    assert summarized == []  # no LLM run
+    assert calls == [(7, "low-coverage")]  # distinct from "low-transcript"
+
+
+async def test_adequate_coverage_meeting_is_not_skipped(tmp_path, monkeypatch):
+    meeting = _meeting_with_wall_clock(1000.0)
+    created = []
+
+    async def create_note(cfg, path, content):
+        created.append(1)
+
+    # 60s speech / 1000s wall clock = 0.06, above the default 0.05 coverage min.
+    _patch_clients(monkeypatch, [meeting], utts=_utts(seconds_each=30.0), create_note_fn=create_note)
+    result = await m.run_once(_cfg(tmp_path))
+    assert result.summarized == 1
+    assert result.skipped == 0
+    assert len(created) == 1
+
+
+async def test_short_meeting_is_never_coverage_gated(tmp_path, monkeypatch):
+    """Wall clock under the 300s floor is too short to judge coverage on, so the gate never
+    fires there, no matter how bad the ratio would otherwise look."""
+    meeting = _meeting_with_wall_clock(200.0)  # under the 300s floor
+    created = []
+
+    async def create_note(cfg, path, content):
+        created.append(1)
+
+    # 5s speech / 200s wall clock = 0.025, below the default 0.05 coverage min -- would be
+    # skipped if the gate applied, but the meeting is too short for the gate to apply at all.
+    _patch_clients(
+        monkeypatch, [meeting], utts=[Utterance("David", 0.0, 5.0, "short call")], create_note_fn=create_note
+    )
+    result = await m.run_once(_cfg(tmp_path, min_sec=2.0))
+    assert result.summarized == 1
+    assert result.skipped == 0
+    assert len(created) == 1
+
+
+async def test_coverage_gate_disabled_at_zero(tmp_path, monkeypatch):
+    meeting = _meeting_with_wall_clock(1000.0)
+    created = []
+
+    async def create_note(cfg, path, content):
+        created.append(1)
+
+    # Same 40s / 1000s = 0.04 ratio as the skip test above, but the gate is off.
+    _patch_clients(monkeypatch, [meeting], utts=_utts(), create_note_fn=create_note)
+    cfg = _cfg(tmp_path)
+    cfg.min_transcript_coverage = 0.0
+    result = await m.run_once(cfg)
+    assert result.summarized == 1
+    assert result.skipped == 0
+    assert len(created) == 1
+
+
+async def test_process_event_meeting_low_coverage_leaves_meeting_for_poll(tmp_path, monkeypatch):
+    """Mirrors the low-transcript webhook test: a coverage-gated skip via the event path must
+    not be permanently marked either, so the next poll still picks the meeting up."""
+    meeting = _meeting_with_wall_clock(1000.0)
+    _patch_clients(monkeypatch, [], utts=_utts())  # 40s / 1000s = 0.04, under the default 0.05
+    result = await m.process_event_meeting(_cfg(tmp_path), meeting)
+    assert result.skipped == 1
+    from summarizer.state import StateStore
+
+    store = StateStore(tmp_path / "state.json")
+    assert store.get(7) is None
+    assert store.is_done(7) is False
+
+
+async def test_malformed_epoch_row_does_not_defeat_the_coverage_gate(tmp_path, monkeypatch):
+    """End-to-end regression: a segment missing 'start' (defaulted to 0.0) with an epoch-scale
+    end_time used to make vexa.get_transcript hand back a ~1.79e9s row, which made __main__'s
+    duration and coverage math blind to a genuinely low-coverage meeting. get_transcript is the
+    real function here (only the HTTP seam is faked), so the whole chain is exercised."""
+    from summarizer import vexa as vexa_mod
+    from summarizer.state import StateStore
+
+    meeting_start_epoch = 1_787_935_800.0
+    payload = {
+        "segments": [
+            {"speaker": "David", "end": meeting_start_epoch + 100.0, "text": "malformed row"},
+        ],
+    }
+
+    async def fake_get(url, headers):
+        return 200, payload
+
+    monkeypatch.setattr(vexa_mod, "_http_get_json", fake_get)
+
+    meeting = Meeting(
+        id=7,
+        platform="google_meet",
+        native_meeting_id="g7",
+        start=datetime.fromtimestamp(meeting_start_epoch, tz=UTC),
+        end=datetime.fromtimestamp(meeting_start_epoch + 2700.0, tz=UTC),  # 2700s wall clock
+    )
+    cfg = _cfg(tmp_path, min_sec=1.0)  # low enough that the bounded 100s row alone clears it
+    store = StateStore(tmp_path / "state.json")
+    result = m.PassResult()
+    await m.process_meeting(cfg, store, meeting, result)
+    # 100s speech / 2700s wall clock = 0.037, under the default 0.05 min -> coverage-gated, not
+    # left unskipped by a duration blown up into the billions.
+    assert result.skipped == 1
+    assert result.summarized == 0
 
 
 async def test_failure_increments_attempts_and_poisons_after_five(tmp_path, monkeypatch):
