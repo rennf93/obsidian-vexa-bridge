@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+- Docs and the compose snippet now point `VEXA_API_URL` and `depends_on` at Vexa's `gateway` service (Vexa 0.12's stock compose name), not `api-gateway` (the 0.10 name), which failed DNS on any current Vexa stack.
+
 ## [0.3.3] - 2026-08-28
 
 ### Fixed

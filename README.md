@@ -101,7 +101,7 @@ All vars come from `summarizer/config.py`. "Required when" is conditional — th
 | `AI_MODEL` | `SUMMARIZE_ENABLED=true` | `anthropic/claude-sonnet-5` | LiteLLM model id, e.g. `openai/qwen2.5:7b` for ollama, `anthropic/claude-sonnet-5` for Anthropic. |
 | `AI_API_KEY` | `SUMMARIZE_ENABLED=true` (use `not-needed` for local ollama) | - | API key for the LLM provider. ollama ignores it; LiteLLM requires a value, so set `not-needed`. |
 | `AI_BASE_URL` | `SUMMARIZE_ENABLED=true` | - | OpenAI-compatible base URL. On the NAS: `http://ollama:11434/v1`. |
-| `VEXA_API_URL` | `SUMMARIZE_ENABLED=true` | - | Vexa api-gateway URL, e.g. `http://api-gateway:8000` in-stack. |
+| `VEXA_API_URL` | `SUMMARIZE_ENABLED=true` | - | Vexa api-gateway URL, e.g. `http://gateway:8000` in-stack. |
 | `VEXA_API_KEY` | `SUMMARIZE_ENABLED=true` | - | Per-user Vexa API token (scope `tx`), minted once via `scripts/mint_token.sh`. Not the admin token. |
 | `SUMMARIZE_PLATFORMS` | never | `discord` | CSV of platforms to summarize, e.g. `discord,google_meet,zoom`. Zoom/Meet parity is this one var. |
 | `MIN_TRANSCRIPT_SECONDS` | never | `30` | Skip meetings with less than this much speech; skipped, not summarized. |
@@ -122,13 +122,13 @@ All vars come from `summarizer/config.py`. "Required when" is conditional — th
 
 ## Deploy
 
-Add this service to your Vexa `docker-compose.yaml` (same network as `api-gateway`). See [`compose-snippet.yml`](compose-snippet.yml) for the full snippet:
+Add this service to your Vexa `docker-compose.yaml` (same network as `gateway`). See [`compose-snippet.yml`](compose-snippet.yml) for the full snippet:
 
 ```yaml
   obsidian-vexa-bridge:
     image: renzof93/obsidian-vexa-bridge:latest
     environment:
-      VEXA_API_URL: http://api-gateway:8000
+      VEXA_API_URL: http://gateway:8000
       VEXA_API_KEY: "${VEXA_SUMMARIZER_TOKEN}"        # per-user tx token, minted once
       SUMMARIZE_PLATFORMS: "discord,google_meet,zoom"
       AI_MODEL: "openai/qwen2.5:7b"                   # whatever you `ollama pull`
@@ -141,7 +141,7 @@ Add this service to your Vexa `docker-compose.yaml` (same network as `api-gatewa
       INCLUDE_TRANSCRIPT: "true"
       POLL_INTERVAL_SECONDS: "180"
       STATE_DIR: "/data/state"
-    depends_on: [api-gateway]
+    depends_on: [gateway]
     volumes:
       - /volume1/vexa-obsidian-notes:/vault           # bind mount — Syncthing shares this host folder
       - obsidian-state:/data/state                    # state.json idempotency

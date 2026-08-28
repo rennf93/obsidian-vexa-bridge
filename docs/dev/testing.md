@@ -37,7 +37,7 @@ Before letting the loop run against a real Vexa, validate the wiring end-to-end:
 ```bash
 # Single pass, full pipeline incl. the LLM call, no writes, no mark_done.
 docker run --rm \
-  -e VEXA_API_URL=http://api-gateway:8000 \
+  -e VEXA_API_URL=http://gateway:8000 \
   -e VEXA_API_KEY="$VEXA_SUMMARIZER_TOKEN" \
   -e AI_MODEL="openai/qwen2.5:7b" \
   -e AI_BASE_URL="http://ollama:11434/v1" \
