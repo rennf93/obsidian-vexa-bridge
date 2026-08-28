@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-08-28
+
+### Fixed
+- Google Meet transcripts no longer render absolute epoch timestamps as elapsed time. Vexa 0.12's Meet lane stamps each segment with the bot's wall-clock `Date.now()`, so `start`/`end` arrive as epoch seconds while Discord and the mixed lane send meeting-relative offsets; a real Meet utterance rendered as `[496648:28:08]` with a `duration` of `00:00:38`. `vexa.get_transcript` now rebases epoch-scale values onto `meeting.start` at the one chokepoint both transcript builders return through, deciding per field rather than per row (a row can carry an epoch `end_time` next to a `start_time` that fell back to `0.0`), and clamps an `end_time` that lands before its own `start_time`.
+
+### Added
+- Coverage gate: a meeting whose speech seconds cover less than `MIN_TRANSCRIPT_COVERAGE` (default `0.05`, `0` disables) of its wall-clock duration is skipped instead of summarized. Speech seconds alone cannot tell a quiet meeting from one whose audio the transcription worker rejected: a 45-minute call that yielded 38 seconds of transcript still cleared `MIN_TRANSCRIPT_SECONDS=30` and was published as a confident summary. Only meetings at least five minutes long are gated, the ratio is clamped at 1.0 (Discord streams each speaker separately, so overlapping speech legitimately exceeds wall clock), and the webhook path leaves a gated meeting eligible for a later poll rather than marking it skipped.
+
 ## [0.3.2] - 2026-08-27
 
 ### Changed
