@@ -1,5 +1,5 @@
 # ── Add this service to your Vexa docker-compose.yaml (same indentation as the
-#    other services) so the sink adapter can reach `api-gateway` in-stack and
+#    other services) so the sink adapter can reach `gateway` in-stack and
 #    the NAS ollama container on the external `ollama_default` network.
 #    Use the prebuilt image, or build from a local checkout.
 #    Keep VEXA_API_KEY / tokens in a gitignored .env — never inline secrets.
@@ -10,7 +10,7 @@
     # build:
     #   context: ./obsidian-vexa-bridge
     environment:
-      VEXA_API_URL: http://api-gateway:8000          # in-stack; no LAN IP
+      VEXA_API_URL: http://gateway:8000          # in-stack; no LAN IP
       VEXA_API_KEY: "${VEXA_SUMMARIZER_TOKEN}"        # per-user tx token, minted once
       SUMMARIZE_PLATFORMS: "discord,google_meet,zoom" # all platforms — Zoom parity is this one var
       MIN_TRANSCRIPT_SECONDS: "30"
@@ -24,7 +24,7 @@
       INCLUDE_TRANSCRIPT: "true"
       POLL_INTERVAL_SECONDS: "180"
       STATE_DIR: "/data/state"
-    depends_on: [api-gateway]
+    depends_on: [gateway]
     volumes:
       # Bind mount — Syncthing shares this host folder into the Mac vault.
       - /volume1/vexa-obsidian-notes:/vault
