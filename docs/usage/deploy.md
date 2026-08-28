@@ -1,6 +1,6 @@
 # Deploy
 
-The adapter is a long-running container that polls Vexa's `api-gateway` over HTTP and writes notes to a filesystem folder (or the Obsidian MCP sink). Run it on the same Docker network as `gateway`; if you use a local ollama for summarization, put it on the same network too.
+The adapter is a long-running container that polls Vexa's `gateway` over HTTP and writes notes to a filesystem folder (or the Obsidian MCP sink). Run it on the same Docker network as `gateway`; if you use a local ollama for summarization, put it on the same network too.
 
 ## Docker Compose
 
