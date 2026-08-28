@@ -237,6 +237,224 @@ async def test_get_transcript_reads_segments_shape(monkeypatch):
     assert utts[0].start_time == 1.0 and utts[0].end_time == 3.6
 
 
+async def test_get_transcript_leaves_relative_timestamps_untouched(monkeypatch):
+    """Discord and the mixed lane already write meeting-relative offsets; get_transcript must
+    not rewrite them just because a meeting also has a distant meeting.start."""
+    payload = {
+        "segments": [
+            {"speaker": "David Freire", "start": 1.0, "end": 3.6, "text": "Okay."},
+            {"speaker": "Renzo", "start": 18.1, "end": 19.6, "text": "I've heard, yeah."},
+        ],
+    }
+
+    async def fake_get(url, headers):
+        return 200, payload
+
+    monkeypatch.setattr(vexa, "_http_get_json", fake_get)
+    from datetime import datetime as _dt
+
+    from summarizer.types import Meeting
+
+    m = Meeting(
+        id=1,
+        platform="discord",
+        native_meeting_id="d1",
+        start=_dt.fromtimestamp(1_700_000_000.0, tz=UTC),
+        end=_dt.fromtimestamp(1_700_003_600.0, tz=UTC),
+    )
+    utts = await vexa.get_transcript(_cfg(), m)
+    assert (utts[0].start_time, utts[0].end_time) == (1.0, 3.6)
+    assert (utts[1].start_time, utts[1].end_time) == (18.1, 19.6)
+
+
+async def test_get_transcript_normalizes_epoch_scale_timestamps(monkeypatch, caplog):
+    """Vexa 0.12's Google Meet lane stamps segments with the bot's wall-clock Date.now(),
+    i.e. absolute epoch seconds, instead of an offset from meeting start."""
+    meeting_start_epoch = 1_787_934_400.0
+    payload = {
+        "segments": [
+            {
+                "speaker": "Renzo",
+                "start": meeting_start_epoch + 20.0,
+                "end": meeting_start_epoch + 25.0,
+                "text": "second",
+            },
+            {
+                "speaker": "David",
+                "start": meeting_start_epoch + 5.0,
+                "end": meeting_start_epoch + 10.0,
+                "text": "first",
+            },
+        ],
+    }
+
+    async def fake_get(url, headers):
+        return 200, payload
+
+    monkeypatch.setattr(vexa, "_http_get_json", fake_get)
+    from datetime import datetime as _dt
+
+    from summarizer.types import Meeting
+
+    m = Meeting(
+        id=10,
+        platform="google_meet",
+        native_meeting_id="g10",
+        start=_dt.fromtimestamp(meeting_start_epoch, tz=UTC),
+        end=_dt.fromtimestamp(meeting_start_epoch + 2700.0, tz=UTC),
+    )
+    with caplog.at_level("INFO", logger="vexa-summarizer"):
+        utts = await vexa.get_transcript(_cfg(), m)
+    # relative ordering preserved, first utterance lands near 0
+    assert [u.text for u in utts] == ["first", "second"]
+    assert utts[0].start_time == pytest.approx(5.0)
+    assert utts[0].end_time == pytest.approx(10.0)
+    assert utts[1].start_time == pytest.approx(20.0)
+    assert utts[1].end_time == pytest.approx(25.0)
+    assert "meeting 10" in caplog.text and "normalized" in caplog.text
+
+
+async def test_get_transcript_normalization_falls_back_when_meeting_start_would_go_negative(monkeypatch):
+    """Clock skew: if meeting.start's epoch is *after* the earliest utterance's own epoch
+    timestamp, subtracting it would push that utterance below 0 -- fall back to subtracting
+    the earliest utterance's own start_time so it lands exactly at 0 instead."""
+    utt_epoch = 1_787_934_400.0
+    payload = {
+        "segments": [
+            {"speaker": "David", "start": utt_epoch, "end": utt_epoch + 5.0, "text": "first"},
+            {"speaker": "Renzo", "start": utt_epoch + 15.0, "end": utt_epoch + 20.0, "text": "second"},
+        ],
+    }
+
+    async def fake_get(url, headers):
+        return 200, payload
+
+    monkeypatch.setattr(vexa, "_http_get_json", fake_get)
+    from datetime import datetime as _dt
+
+    from summarizer.types import Meeting
+
+    m = Meeting(
+        id=10,
+        platform="google_meet",
+        native_meeting_id="g10",
+        start=_dt.fromtimestamp(utt_epoch + 100.0, tz=UTC),  # later than the earliest segment
+        end=_dt.fromtimestamp(utt_epoch + 2700.0, tz=UTC),
+    )
+    utts = await vexa.get_transcript(_cfg(), m)
+    assert utts[0].start_time == 0.0
+    assert utts[0].end_time == pytest.approx(5.0)
+    assert utts[1].start_time == pytest.approx(15.0)
+    assert utts[1].end_time == pytest.approx(20.0)
+
+
+async def test_get_transcript_normalizes_per_field_in_a_mixed_transcript(monkeypatch):
+    """A transcript can mix an already-relative row with real epoch rows in the same list; a
+    single list-wide offset decision (picking the smallest start_time overall) would let the
+    relative row's small value win and leave the epoch rows unshifted. Each field must be
+    judged (and shifted) on its own instead."""
+    meeting_start_epoch = 1_787_935_800.0
+    payload = {
+        "segments": [
+            {"speaker": "Stray", "start": 5.2, "end": 8.0, "text": "already relative"},
+            {
+                "speaker": "Renzo",
+                "start": meeting_start_epoch + 38.0,
+                "end": meeting_start_epoch + 40.0,
+                "text": "second",
+            },
+            {"speaker": "David", "start": meeting_start_epoch, "end": meeting_start_epoch + 2.0, "text": "first"},
+        ],
+    }
+
+    async def fake_get(url, headers):
+        return 200, payload
+
+    monkeypatch.setattr(vexa, "_http_get_json", fake_get)
+    from datetime import datetime as _dt
+
+    from summarizer.types import Meeting
+
+    m = Meeting(
+        id=12,
+        platform="google_meet",
+        native_meeting_id="g12",
+        start=_dt.fromtimestamp(meeting_start_epoch, tz=UTC),
+        end=_dt.fromtimestamp(meeting_start_epoch + 2700.0, tz=UTC),
+    )
+    utts = await vexa.get_transcript(_cfg(), m)
+    by_text = {u.text: u for u in utts}
+    # epoch rows rebased against meeting.start
+    assert (by_text["first"].start_time, by_text["first"].end_time) == (pytest.approx(0.0), pytest.approx(2.0))
+    assert (by_text["second"].start_time, by_text["second"].end_time) == (pytest.approx(38.0), pytest.approx(40.0))
+    # the stray already-relative row is untouched, byte-identical
+    assert (by_text["already relative"].start_time, by_text["already relative"].end_time) == (5.2, 8.0)
+
+
+async def test_get_transcript_bounds_a_row_missing_start_with_an_epoch_end(monkeypatch):
+    """Regression: a segment missing 'start' falls back to start_time=0.0 above, while its
+    end_time is epoch-scale. Before per-field normalization, this row's own end_time was left
+    at ~1.79 billion, so duration math downstream (__main__'s min-duration and coverage gates)
+    saw a multi-billion-second span instead of a real one."""
+    meeting_start_epoch = 1_787_935_800.0
+    payload = {
+        "segments": [
+            {"speaker": "David", "end": meeting_start_epoch + 35.0, "text": "malformed row"},
+        ],
+    }
+
+    async def fake_get(url, headers):
+        return 200, payload
+
+    monkeypatch.setattr(vexa, "_http_get_json", fake_get)
+    from datetime import datetime as _dt
+
+    from summarizer.types import Meeting
+
+    m = Meeting(
+        id=13,
+        platform="google_meet",
+        native_meeting_id="g13",
+        start=_dt.fromtimestamp(meeting_start_epoch, tz=UTC),
+        end=_dt.fromtimestamp(meeting_start_epoch + 2700.0, tz=UTC),
+    )
+    utts = await vexa.get_transcript(_cfg(), m)
+    assert utts[0].start_time == 0.0
+    assert utts[0].end_time == pytest.approx(35.0)
+    assert utts[0].end_time < 10_000  # bounded and sane, nowhere near the billions
+
+
+async def test_get_transcript_normalization_clamps_end_before_start(monkeypatch):
+    """A row with an epoch start but no 'end' field (defaulted to 0.0, relative-scale) can land
+    with end_time < start_time after per-field normalization; pull end_time up to start_time so
+    no utterance ever reports a negative span."""
+    meeting_start_epoch = 1_787_935_800.0
+    payload = {
+        "segments": [
+            {"speaker": "David", "start": meeting_start_epoch + 50.0, "text": "no end field"},
+        ],
+    }
+
+    async def fake_get(url, headers):
+        return 200, payload
+
+    monkeypatch.setattr(vexa, "_http_get_json", fake_get)
+    from datetime import datetime as _dt
+
+    from summarizer.types import Meeting
+
+    m = Meeting(
+        id=14,
+        platform="google_meet",
+        native_meeting_id="g14",
+        start=_dt.fromtimestamp(meeting_start_epoch, tz=UTC),
+        end=_dt.fromtimestamp(meeting_start_epoch + 2700.0, tz=UTC),
+    )
+    utts = await vexa.get_transcript(_cfg(), m)
+    assert utts[0].start_time == pytest.approx(50.0)
+    assert utts[0].end_time == utts[0].start_time
+
+
 async def test_write_notes_patches_with_data_notes(monkeypatch):
     captured = {}
 
@@ -327,6 +545,52 @@ async def test_transcript_falls_back_to_db_on_422_when_dsn_configured(monkeypatc
     assert conn.closed is True
     assert conn.queries[0][1] == (7,)
     assert [(u.speaker, u.text, u.start_time) for u in utts] == [("Renzo", "later", 5.0), ("Unknown", "", 0.0)]
+
+
+async def test_transcript_from_db_fallback_also_gets_normalized(monkeypatch):
+    """get_transcript is the one funnel for both builders -- the DB fallback path must get the
+    same epoch-scale normalization as the gateway/segments path, not a separate copy of it."""
+
+    async def fake_get(url, headers):
+        return 422, {"detail": "unsupported platform"}
+
+    monkeypatch.setattr(vexa, "_http_get_json", fake_get)
+    dsn_seen: list[str] = []
+    meeting_start_epoch = 1_787_934_400.0
+    rows = [
+        {
+            "speaker": "Renzo",
+            "text": "second",
+            "start_time": meeting_start_epoch + 20.0,
+            "end_time": meeting_start_epoch + 25.0,
+        },
+        {
+            "speaker": "David",
+            "text": "first",
+            "start_time": meeting_start_epoch + 5.0,
+            "end_time": meeting_start_epoch + 10.0,
+        },
+    ]
+    _fake_asyncpg(monkeypatch, rows, dsn_seen)
+    cfg = _cfg()
+    cfg.vexa_database_url = "postgresql://u:p@db/vexa"
+    from datetime import datetime as _dt
+
+    from summarizer.types import Meeting
+
+    meeting = Meeting(
+        id=10,
+        platform="google_meet",
+        native_meeting_id="g10",
+        start=_dt.fromtimestamp(meeting_start_epoch, tz=UTC),
+        end=_dt.fromtimestamp(meeting_start_epoch + 2700.0, tz=UTC),
+    )
+    utts = await vexa.get_transcript(cfg, meeting)
+    # _get_transcript_from_db doesn't re-sort (relies on the SQL's ORDER BY, unmodeled by the
+    # fake connection above); normalization must not reorder either, just shift values.
+    assert [u.text for u in utts] == ["second", "first"]
+    assert utts[0].start_time == pytest.approx(20.0)  # "second"
+    assert utts[1].start_time == pytest.approx(5.0)  # "first"
 
 
 async def test_transcript_422_without_dsn_still_raises(monkeypatch):

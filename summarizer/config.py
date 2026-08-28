@@ -24,6 +24,7 @@ from pathlib import Path
 DEFAULT_AI_MODEL = "anthropic/claude-sonnet-5"
 DEFAULT_PLATFORMS = ["discord"]
 DEFAULT_MIN_SECONDS = 30.0
+DEFAULT_MIN_COVERAGE = 0.05
 DEFAULT_OBSIDIAN_URL = "http://localhost:8765/mcp"
 DEFAULT_NOTE_FOLDER = "Meetings"
 DEFAULT_STATE_DIR = Path.home() / ".local" / "share" / "vexa-summarizer"
@@ -56,6 +57,7 @@ class Config:
     vexa_database_url: str | None = None  # direct-Postgres fallback for transcripts
     summarize_platforms: list[str] = field(default_factory=lambda: list(DEFAULT_PLATFORMS))
     min_transcript_seconds: float = DEFAULT_MIN_SECONDS
+    min_transcript_coverage: float = DEFAULT_MIN_COVERAGE
     obsidian_enabled: bool = True
     obsidian_mcp_url: str = DEFAULT_OBSIDIAN_URL
     obsidian_mcp_token: str | None = None
@@ -116,6 +118,7 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
     cfg.vexa_database_url = (env.get("VEXA_DATABASE_URL") or "").strip() or None
     cfg.summarize_platforms = _split_csv(env.get("SUMMARIZE_PLATFORMS")) or list(DEFAULT_PLATFORMS)
     cfg.min_transcript_seconds = float(env.get("MIN_TRANSCRIPT_SECONDS", str(DEFAULT_MIN_SECONDS)))
+    cfg.min_transcript_coverage = float(env.get("MIN_TRANSCRIPT_COVERAGE", str(DEFAULT_MIN_COVERAGE)))
     cfg.dry_run = _bool(env.get("DRY_RUN", "false"))
     state_dir = (env.get("STATE_DIR") or "").strip()
     cfg.state_dir = Path(state_dir) if state_dir else DEFAULT_STATE_DIR

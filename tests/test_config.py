@@ -119,6 +119,15 @@ def test_defaults_when_optional_vars_missing():
     assert cfg.state_dir == Path.home() / ".local" / "share" / "vexa-summarizer"
 
 
+def test_min_transcript_coverage_default_and_override():
+    cfg = config.load_config(_base_env())  # MIN_TRANSCRIPT_COVERAGE absent
+    assert cfg.min_transcript_coverage == 0.05
+    env = _base_env()
+    env["MIN_TRANSCRIPT_COVERAGE"] = "0.1"
+    cfg = config.load_config(env)
+    assert cfg.min_transcript_coverage == 0.1
+
+
 # --- per-sink required-var enforcement -------------------------------------
 
 
