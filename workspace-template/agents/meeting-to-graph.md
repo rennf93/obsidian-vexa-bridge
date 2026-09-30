@@ -14,6 +14,7 @@ Run this whenever the routine fires. Read `CLAUDE.md` first; it is the contract.
    8. Update the `index.md` of every type folder you added to or renamed in, and `README.md` counts.
    9. Append one `log.md` entry under today's date naming the meeting and the entities touched.
    10. Move the transcript to `uploads/processed/` with the same filename.
+   11. CALIBRATION JOIN-BACK (only when `.laya/meeting-scan.md` exists): append a `## Calibration - <transcript filename>` section to it, one line per candidate: `- <start_ts>-<end_ts> (<score>) TRUE` when the candidate was a real decision you folded (score = its scan score), or `FALSE` when it was not; then one line `- MISSED: <start_ts>-<end_ts> <short quote>` for every decision you folded that the scan had NOT flagged (omit the section header and MISSED lines when there were no candidates and nothing missed). This verdict line is how the local classifier learns; never skip it silently.
 3. Reply with one line per transcript processed: the meeting title and the number of entities created and updated.
 
 Never run git commands; the platform commits your changes. Never touch `Dashboards/`.
