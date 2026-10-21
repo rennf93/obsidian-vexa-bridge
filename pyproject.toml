@@ -8,7 +8,7 @@ authors = [{ name = "Renzo Franceschini" }]
 # Pinned to 3.11 for parity with discord-vexa-bridge (the source adapter).
 requires-python = ">=3.11,<3.12"
 dependencies = [
-    "litellm",
+    "litellm==1.106.2",
     "aiohttp",
     "asyncpg>=0.31.0",
 ]
