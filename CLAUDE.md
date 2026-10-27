@@ -49,3 +49,8 @@ CI (`.github/workflows/ci.yml`) runs `pre-commit run --all-files` (ruff, ruff-fo
 - Never commit secrets. `VEXA_API_KEY` / `VEXA_SUMMARIZER_TOKEN`, `AI_API_KEY`, `OBSIDIAN_MCP_TOKEN`, `.env`, and `.env.*.local` are runtime config and gitignored.
 - The LLM routes through an OpenAI-compatible `/v1` endpoint. On the NAS use `http://ollama:11434/v1` with `AI_MODEL=openai/<pulled-model>` and `AI_API_KEY=not-needed` (ollama ignores the key; LiteLLM requires a value). Plain `ollama/*` ids hit `/api/generate` and the local raw models have no chat template — use the `openai/` prefix.
 - The invariant: `mark_done` is the only commit and it runs last. `create_note`'s fail-if-exists and `write_note_fs`'s "file already exists" no-op are the crash-recovery backstops across both sinks — don't weaken them to overwrites, or a crash mid-pass can duplicate or clobber a note.
+
+<!-- entire-agent:begin -->
+Read .entire/agent-guide.md for this repository's workflow, source inspection, and verification guidance.
+@.entire/agent-guide.md
+<!-- entire-agent:end -->
