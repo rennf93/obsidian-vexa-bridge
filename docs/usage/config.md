@@ -17,10 +17,12 @@ All vars come from `summarizer/config.py`. "Required when" is conditional — th
 | `SUMMARIZE_PLATFORMS` | never | `discord` | CSV of platforms to summarize, e.g. `discord,google_meet,zoom`. Zoom/Meet parity is this one var. |
 | `MIN_TRANSCRIPT_SECONDS` | never | `30` | Skip meetings with less than this much speech; skipped, not summarized. |
 | `LOW_TRANSCRIPT_GRACE_SECONDS` | never | `0` | A meeting whose transcript is still empty and that ended less than this many seconds ago is left pending for a later poll instead of being marked skipped, so a transcript that lands after the meeting completes (recording-only bots transcribed later) is still summarized. A meeting with any transcript goes through the gates as before. `0` keeps the old behavior: skip immediately. Must be >= 0. |
+| `SPEAKER_NAMING_ENABLED` | never | `false` | When a transcript's speakers are all generic (`Speaker 1`, `Speaker 2`, ... or `Unknown`, as the recording transcriber's diarization writes them), ask the LLM once to name them from the conversation (direct address, self-introduction, `OWNER_NAME`) before summarizing, so the note, its `participants` and its filename use the names. Labels the conversation does not support stay generic. Any failure keeps the generic labels and never fails the meeting. Already-named transcripts (Discord) make no extra call. Uses the `AI_*` settings, in graph mode too. |
+| `OWNER_NAME` | never | - | The recording owner, always one of the speakers; given to the naming prompt as a hint. At most 40 characters, no newline, `/`, `\` or `:`. Only used when `SPEAKER_NAMING_ENABLED=true`. |
 
 ## Graph mode
 
-These vars only matter when `BRIDGE_MODE=graph`. In graph mode `AI_*`, `OBSIDIAN_*`, `INCLUDE_TRANSCRIPT`, and `VEXA_NOTES_ENABLED` are ignored entirely (the agent on the Vexa side writes the graph, not this process), and `VAULT_DIR` becomes optional: set it when the bridge can also reach the vault directly, so it fast-forwards the mirror folder after each pass; leave it unset and the mirror only advances however the agent's own push reaches it.
+These vars only matter when `BRIDGE_MODE=graph`. In graph mode `OBSIDIAN_*`, `INCLUDE_TRANSCRIPT`, and `VEXA_NOTES_ENABLED` are ignored entirely, and `AI_*` is used only by `SPEAKER_NAMING_ENABLED` (the agent on the Vexa side writes the graph, not this process), and `VAULT_DIR` becomes optional: set it when the bridge can also reach the vault directly, so it fast-forwards the mirror folder after each pass; leave it unset and the mirror only advances however the agent's own push reaches it.
 
 | Variable | Required when | Default | Description |
 |---|---|---|---|

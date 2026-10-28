@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Added
+- `SPEAKER_NAMING_ENABLED` (default `false`, which keeps the old behavior) and `OWNER_NAME`: when every speaker label in a transcript is generic (`Speaker N` or `Unknown`), the bridge asks the LLM once to name them from the conversation (direct address, self-introduction, the owner hint) and applies the names before summarizing, so the note, its frontmatter participants and its filename use them. The reply is validated (JSON object, known labels only, non-empty names of at most 40 characters without newlines or path separators, no two labels sharing a name); any failure keeps the generic labels and never fails the meeting. Already-named transcripts make no extra call. Works in note and graph mode, which now reads `AI_*` for this.
 ### Fixed
 - `recording_transcriber` no longer shows `unhealthy`: its image inherited the transcription worker's `HEALTHCHECK` (`curl http://localhost:8000/health`), an HTTP endpoint this batch job does not serve. The Dockerfile now sets `HEALTHCHECK NONE`.
 

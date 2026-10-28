@@ -2,8 +2,8 @@
 `python -m summarizer` (or `python -m summarizer --once` for a single validation pass).
 
 Flow per pass: list Vexa completed meetings -> for each not done/poisoned -> fetch transcript
--> min-duration guard -> coverage guard -> summarize -> enabled sinks (Obsidian note via fs or
-mcp, Vexa notes) -> mark_done. mark_done is the only commit and runs last, so a crash mid-pass
+-> min-duration guard -> coverage guard -> speaker naming (opt-in) -> summarize -> enabled sinks
+(Obsidian note via fs or mcp, Vexa notes) -> mark_done. mark_done is the only commit and runs last, so a crash mid-pass
 is harmless (next pass redoes it; the note sink's fail-if-exists is the backstop). Failures
 record_failure; after 5 a meeting is poisoned and skipped until state.json is manually cleared.
 
@@ -50,6 +50,7 @@ from summarizer.graph import (
 )
 from summarizer.llm import summarize  # async; litellm lazy-imported inside
 from summarizer.obsidian import assemble_note, create_note, note_path, write_note_fs
+from summarizer.speakers import name_speakers
 from summarizer.state import StateStore
 from summarizer.types import Meeting, MeetingMeta, Utterance
 from summarizer.vexa import get_transcript, list_completed_meetings, write_notes
@@ -163,6 +164,7 @@ async def process_meeting(
                 )
                 return
 
+        utts = await name_speakers(utts, cfg)  # best-effort: never raises, keeps generic labels on failure
         meta = _meta_from(meeting, utts, duration)
 
         if cfg.bridge_mode == "graph":
