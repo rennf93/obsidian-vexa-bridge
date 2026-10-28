@@ -37,6 +37,7 @@ import os
 import signal
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from summarizer import config as _config_mod
 from summarizer.agent_api import upload
@@ -108,21 +109,32 @@ async def process_meeting(
     by the webhook path, where an event can fire before Vexa's last transcript flush lands, so
     a meeting must stay eligible for the next poll rather than being permanently marked
     skipped.
+
+    LOW_TRANSCRIPT_GRACE_SECONDS > 0 gives the same treatment on the poll path to a meeting that
+    ended less than that many seconds ago: a recording-only bot's transcript can land minutes
+    after the meeting completes, so the gates leave it pending until the grace window passes.
     """
     key = meeting.id
     if store.is_done(key) or store.is_poisoned(key):
         result.idle += 1
         return
+    in_grace = (
+        cfg.low_transcript_grace_seconds > 0
+        and (datetime.now(UTC) - meeting.end).total_seconds() < cfg.low_transcript_grace_seconds
+    )
+    leave_pending = in_grace or not mark_low_transcript
     try:
         utts = await get_transcript(cfg, meeting)
         # max(0.0, ...): belt and braces on top of vexa.get_transcript's own clamping, so one
         # malformed row (end_time before its own start_time) can't drag the total negative.
         duration = sum(max(0.0, u.end_time - u.start_time) for u in utts)
         if duration < cfg.min_transcript_seconds:
-            if mark_low_transcript:
+            if not leave_pending:
                 store.mark_skipped(key, "low-transcript")
             result.skipped += 1
             log.info("meeting %s skipped: %.1fs < %.1fs min", key, duration, cfg.min_transcript_seconds)
+            if in_grace:
+                log.info("meeting %s left pending: inside LOW_TRANSCRIPT_GRACE_SECONDS", key)
             return
 
         # Speech seconds alone misses the case where Vexa's transcription worker rejected most
@@ -137,7 +149,7 @@ async def process_meeting(
             # overlap read as coverage above 100%.
             coverage = min(duration / wall_clock, 1.0)
             if coverage < cfg.min_transcript_coverage:
-                if mark_low_transcript:
+                if not leave_pending:
                     store.mark_skipped(key, "low-coverage")
                 result.skipped += 1
                 log.info(
@@ -148,6 +160,8 @@ async def process_meeting(
                     coverage,
                     cfg.min_transcript_coverage,
                 )
+                if in_grace:
+                    log.info("meeting %s left pending: inside LOW_TRANSCRIPT_GRACE_SECONDS", key)
                 return
 
         meta = _meta_from(meeting, utts, duration)

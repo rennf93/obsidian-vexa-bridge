@@ -25,6 +25,7 @@ DEFAULT_AI_MODEL = "anthropic/claude-sonnet-5"
 DEFAULT_PLATFORMS = ["discord"]
 DEFAULT_MIN_SECONDS = 30.0
 DEFAULT_MIN_COVERAGE = 0.05
+DEFAULT_LOW_TRANSCRIPT_GRACE_SECONDS = 0.0
 DEFAULT_OBSIDIAN_URL = "http://localhost:8765/mcp"
 DEFAULT_NOTE_FOLDER = "Meetings"
 DEFAULT_STATE_DIR = Path.home() / ".local" / "share" / "vexa-summarizer"
@@ -58,6 +59,7 @@ class Config:
     summarize_platforms: list[str] = field(default_factory=lambda: list(DEFAULT_PLATFORMS))
     min_transcript_seconds: float = DEFAULT_MIN_SECONDS
     min_transcript_coverage: float = DEFAULT_MIN_COVERAGE
+    low_transcript_grace_seconds: float = DEFAULT_LOW_TRANSCRIPT_GRACE_SECONDS
     obsidian_enabled: bool = True
     obsidian_mcp_url: str = DEFAULT_OBSIDIAN_URL
     obsidian_mcp_token: str | None = None
@@ -119,6 +121,11 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
     cfg.summarize_platforms = _split_csv(env.get("SUMMARIZE_PLATFORMS")) or list(DEFAULT_PLATFORMS)
     cfg.min_transcript_seconds = float(env.get("MIN_TRANSCRIPT_SECONDS", str(DEFAULT_MIN_SECONDS)))
     cfg.min_transcript_coverage = float(env.get("MIN_TRANSCRIPT_COVERAGE", str(DEFAULT_MIN_COVERAGE)))
+    cfg.low_transcript_grace_seconds = float(
+        env.get("LOW_TRANSCRIPT_GRACE_SECONDS", str(DEFAULT_LOW_TRANSCRIPT_GRACE_SECONDS))
+    )
+    if cfg.low_transcript_grace_seconds < 0:
+        raise ConfigError(f"LOW_TRANSCRIPT_GRACE_SECONDS must be >= 0, got {cfg.low_transcript_grace_seconds}")
     cfg.dry_run = _bool(env.get("DRY_RUN", "false"))
     state_dir = (env.get("STATE_DIR") or "").strip()
     cfg.state_dir = Path(state_dir) if state_dir else DEFAULT_STATE_DIR

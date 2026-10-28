@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Added
+- `LOW_TRANSCRIPT_GRACE_SECONDS` (default `0`, which keeps the old behavior): when above zero, a meeting that ended less than that many seconds ago and trips the `MIN_TRANSCRIPT_SECONDS` or `MIN_TRANSCRIPT_COVERAGE` gate on the poll path is left pending instead of being marked skipped, the same way the webhook path already behaves. Recording-only bots are transcribed 10 to 60 minutes after the meeting completes, so the first poll sees an empty transcript; past the grace window the gates mark the meeting skipped as before. A negative value is a `ConfigError`.
+
 ### Fixed
 - Docs and the compose snippet now point `VEXA_API_URL` and `depends_on` at Vexa's `gateway` service (Vexa 0.12's stock compose name), not `api-gateway` (the 0.10 name), which failed DNS on any current Vexa stack.
 

@@ -933,3 +933,76 @@ async def test_poll_and_event_paths_both_call_the_shared_finalize_helper(tmp_pat
     result = await m.process_event_meeting(_graph_cfg(tmp_path), _meeting(mid=8, native="d8"))
     assert result.uploaded == 1
     assert calls == [(1, True)]
+
+
+# --- LOW_TRANSCRIPT_GRACE_SECONDS: late transcripts stay eligible -----------------------------
+
+
+def _meeting_ended_ago(seconds_ago: float, wall_clock: float = 1000.0):
+    end = datetime.now(UTC) - timedelta(seconds=seconds_ago)
+    return Meeting(
+        id=7,
+        platform="discord",
+        native_meeting_id="d7",
+        start=end - timedelta(seconds=wall_clock),
+        end=end,
+    )
+
+
+async def test_low_transcript_inside_grace_is_left_pending(tmp_path, monkeypatch):
+    from summarizer.state import StateStore
+
+    _patch_clients(monkeypatch, [_meeting_ended_ago(60)], utts=[])
+    cfg = _cfg(tmp_path)
+    cfg.low_transcript_grace_seconds = 3600.0
+    result = await m.run_once(cfg)
+    assert result.skipped == 1
+    assert StateStore(tmp_path / "state.json").get(7) is None
+
+
+async def test_low_transcript_past_grace_is_marked_skipped(tmp_path, monkeypatch):
+    from summarizer.state import StateStore
+
+    _patch_clients(monkeypatch, [_meeting_ended_ago(7200)], utts=[])
+    cfg = _cfg(tmp_path)
+    cfg.low_transcript_grace_seconds = 3600.0
+    result = await m.run_once(cfg)
+    assert result.skipped == 1
+    assert StateStore(tmp_path / "state.json").is_done(7) is True
+
+
+async def test_low_transcript_just_ended_with_default_grace_is_marked_skipped(tmp_path, monkeypatch):
+    from summarizer.state import StateStore
+
+    _patch_clients(monkeypatch, [_meeting_ended_ago(1)], utts=[])
+    result = await m.run_once(_cfg(tmp_path))  # grace 0 = old behavior
+    assert result.skipped == 1
+    assert StateStore(tmp_path / "state.json").is_done(7) is True
+
+
+async def test_low_coverage_inside_grace_is_left_pending(tmp_path, monkeypatch):
+    from summarizer.state import StateStore
+
+    _patch_clients(monkeypatch, [_meeting_ended_ago(60)], utts=_utts())  # 40s / 1000s = 0.04
+    cfg = _cfg(tmp_path)
+    cfg.low_transcript_grace_seconds = 3600.0
+    result = await m.run_once(cfg)
+    assert result.skipped == 1
+    assert StateStore(tmp_path / "state.json").get(7) is None
+
+
+async def test_late_transcript_is_summarized_on_a_later_pass(tmp_path, monkeypatch):
+    """The point of the grace window: empty transcript on the first poll, full one later."""
+    created = []
+
+    async def create_note(cfg, path, content):
+        created.append(1)
+
+    meeting = _meeting_ended_ago(60, wall_clock=100.0)
+    _patch_clients(monkeypatch, [meeting], utts=[], create_note_fn=create_note)
+    cfg = _cfg(tmp_path)
+    cfg.low_transcript_grace_seconds = 3600.0
+    assert (await m.run_once(cfg)).skipped == 1
+    _patch_clients(monkeypatch, [meeting], utts=_utts(), create_note_fn=create_note)
+    assert (await m.run_once(cfg)).summarized == 1
+    assert len(created) == 1

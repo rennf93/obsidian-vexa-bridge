@@ -16,6 +16,7 @@ All vars come from `summarizer/config.py`. "Required when" is conditional — th
 | `VEXA_DATABASE_URL` | never | - | Direct-Postgres connection string, used in both modes as a fallback when the gateway's transcript route rejects a platform (notably `discord`, whose rows `discord-vexa-bridge` writes straight into `transcriptions`). Unset by default; the gateway call is tried first either way. |
 | `SUMMARIZE_PLATFORMS` | never | `discord` | CSV of platforms to summarize, e.g. `discord,google_meet,zoom`. Zoom/Meet parity is this one var. |
 | `MIN_TRANSCRIPT_SECONDS` | never | `30` | Skip meetings with less than this much speech; skipped, not summarized. |
+| `LOW_TRANSCRIPT_GRACE_SECONDS` | never | `0` | A meeting that ended less than this many seconds ago and trips the min-seconds or coverage gate is left pending for a later poll instead of being marked skipped, so a transcript that lands after the meeting completes (e.g. recording-only bots transcribed later) is still summarized. `0` keeps the old behavior: skip immediately. Must be >= 0. |
 
 ## Graph mode
 

@@ -106,6 +106,7 @@ All vars come from `summarizer/config.py`. "Required when" is conditional — th
 | `SUMMARIZE_PLATFORMS` | never | `discord` | CSV of platforms to summarize, e.g. `discord,google_meet,zoom`. Zoom/Meet parity is this one var. |
 | `MIN_TRANSCRIPT_SECONDS` | never | `30` | Skip meetings with less than this much speech; skipped, not summarized. |
 | `MIN_TRANSCRIPT_COVERAGE` | never | `0.05` | Skip meetings (at least 300s wall clock) where speech seconds / wall-clock seconds falls below this ratio, e.g. Vexa's transcription worker rejected most of the audio. `0` disables the gate. |
+| `LOW_TRANSCRIPT_GRACE_SECONDS` | never | `0` | A meeting that ended less than this many seconds ago and trips the min-seconds or coverage gate is left pending for a later poll instead of being marked skipped, so a transcript that lands after the meeting completes (e.g. recording-only bots transcribed later) is still summarized. `0` keeps the old behavior: skip immediately. Must be >= 0. |
 | `OBSIDIAN_ENABLED` | never | `true` | Write an Obsidian note per meeting. |
 | `OBSIDIAN_SINK` | `OBSIDIAN_ENABLED=true` | `fs` | Sink type: `fs` (filesystem, `VAULT_DIR`) or `mcp` (vault-as-mcp HTTP, `OBSIDIAN_MCP_URL`). |
 | `VAULT_DIR` | `OBSIDIAN_ENABLED=true` and `OBSIDIAN_SINK=fs` | - | Host folder bind-mounted into the container (e.g. `/vault`); Syncthing mirrors it into the Mac vault. No sane default in a container. |
