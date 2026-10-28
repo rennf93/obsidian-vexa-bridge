@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+- `recording_transcriber` no longer shows `unhealthy`: its image inherited the transcription worker's `HEALTHCHECK` (`curl http://localhost:8000/health`), an HTTP endpoint this batch job does not serve. The Dockerfile now sets `HEALTHCHECK NONE`.
+
 ## [0.4.0] - 2026-10-28
 
 ### Added
