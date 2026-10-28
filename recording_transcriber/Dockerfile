@@ -5,5 +5,7 @@ ARG BASE_IMAGE=vexa-transcription:cpu-v012
 FROM ${BASE_IMAGE}
 RUN uv pip install --python /opt/venv/bin/python --no-cache "psycopg[binary]==3.3.6"
 COPY transcribe_recordings.py /app/transcribe_recordings.py
+# The base image checks the worker's HTTP /health, which this batch job does not serve.
+HEALTHCHECK NONE
 ENTRYPOINT ["python", "/app/transcribe_recordings.py"]
 CMD []
