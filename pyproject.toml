@@ -22,6 +22,8 @@ dev = [
     "bandit",
     "pre-commit",
     "psycopg[binary]",
+    "scipy",
+    "numpy",
 ]
 
 [project.urls]
