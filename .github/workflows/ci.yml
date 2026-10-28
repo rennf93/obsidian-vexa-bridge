@@ -5,6 +5,7 @@ on:
     branches: [master]
     paths:
       - 'summarizer/**'
+      - 'recording_transcriber/**'
       - 'tests/**'
       - 'pyproject.toml'
       - 'requirements.txt'

@@ -79,6 +79,24 @@ MEETINGS = [
         {"recordings": [_recording("s8", "2026-10-25T17:32:08Z")]},
         [("s8", "2026-10-25T17:31:17Z")],
     ),
+    # a non-final audio file that is not a master recording does not hold the meeting back
+    (
+        9,
+        "google_meet",
+        1,
+        {
+            "recordings": [
+                {
+                    **_recording("s9", "2026-10-28T17:32:08Z"),
+                    "media_files": [
+                        *_recording("s9", "2026-10-28T17:32:08Z")["media_files"],
+                        {"type": "audio", "is_final": False, "storage_path": "recordings/1/1/s9/audio/000001.webm"},
+                    ],
+                }
+            ]
+        },
+        [("s9", "2026-10-28T17:31:17Z")],
+    ),
 ]
 
 
@@ -120,7 +138,7 @@ def _candidates(module, conn, meeting=None):
 def test_candidates_skip_bad_json_unfinished_transcribed_other_platform_and_old(db):
     module, conn = db
     rows = _candidates(module, conn)
-    assert [(r[0], r[1]) for r in rows] == [(1, "s1"), (6, "s6a"), (6, "s6b")]
+    assert [(r[0], r[1]) for r in rows] == [(1, "s1"), (6, "s6a"), (6, "s6b"), (9, "s9")]
     assert round((rows[0][3] - rows[0][2]).total_seconds(), 2) == 50.12
     assert rows[0][4] == "recordings/1/1/s1/audio/master.webm"
 
@@ -141,4 +159,4 @@ def test_insert_is_idempotent_and_takes_the_meeting_out_of_the_candidates(db):
         "SELECT start_time, text, speaker, created_at IS NOT NULL FROM transcriptions WHERE meeting_id = 1"
     )
     assert stored.fetchall() == [(51.0, "hello", None, True)]
-    assert [r[0] for r in _candidates(module, conn)] == [6, 6]
+    assert [r[0] for r in _candidates(module, conn)] == [6, 6, 9]

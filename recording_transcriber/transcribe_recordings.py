@@ -39,8 +39,8 @@ log = logging.getLogger("recording-transcriber")
 # One row per finalized master audio file of a completed meeting that has no transcript yet.
 # meetings.end_time is a naive UTC timestamp, hence the explicit UTC now. `recordings` and
 # `media_files` can hold a JSON null, which jsonb_array_elements rejects for the whole query, so
-# anything that is not an array counts as empty. A meeting is only taken once every audio file
-# in it is final, so a session that is still finalizing cannot be left out of the transcript.
+# anything that is not an array counts as empty. A meeting is only taken once every master audio
+# recording in it is final, so a session that is still finalizing cannot be left out of the transcript.
 CANDIDATES_SQL = """
 WITH recs AS (
     SELECT m.id, rec, mf
@@ -49,7 +49,7 @@ WITH recs AS (
         CASE WHEN jsonb_typeof(m.data->'recordings') = 'array' THEN m.data->'recordings' ELSE '[]' END) rec
     CROSS JOIN LATERAL jsonb_array_elements(
         CASE WHEN jsonb_typeof(rec->'media_files') = 'array' THEN rec->'media_files' ELSE '[]' END) mf
-    WHERE mf->>'type' = 'audio'
+    WHERE mf->>'type' = 'audio' AND mf->>'storage_path' LIKE '%%/master.webm'
 )
 SELECT m.id, ms.session_uid, ms.session_start_time, (r.rec->>'created_at')::timestamptz, r.mf->>'storage_path'
 FROM meetings m
@@ -59,7 +59,6 @@ WHERE m.status = 'completed'
   AND m.platform = ANY(%(platforms)s)
   AND (%(meeting)s::int IS NOT NULL OR m.end_time > (now() AT TIME ZONE 'utc') - %(lookback)s * interval '1 hour')
   AND (%(meeting)s::int IS NULL OR m.id = %(meeting)s::int)
-  AND r.mf->>'storage_path' LIKE '%%/master.webm'
   AND NOT EXISTS (
       SELECT 1 FROM recs pending WHERE pending.id = m.id AND pending.mf->>'is_final' IS DISTINCT FROM 'true')
   AND NOT EXISTS (SELECT 1 FROM transcriptions t WHERE t.meeting_id = m.id)
