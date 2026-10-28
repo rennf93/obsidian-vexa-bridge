@@ -1,4 +1,4 @@
-"""Name generic diarization labels ("Speaker 1", "Unknown") from the conversation itself.
+"""Name generic diarization labels ("Speaker 1", "Speaker 2", ...) from the conversation itself.
 
 Vexa 0.12 records no participant roster, so the only source of real names is what people say
 (direct address, self-introduction) plus the recording owner (OWNER_NAME). One LLM call, through
@@ -44,7 +44,8 @@ exactly as written in the transcript and whose values are first names. Example: 
 
 def has_generic_speakers(transcript: list[Utterance]) -> bool:
     labels = {u.speaker for u in transcript}
-    return bool(labels) and all(_GENERIC_LABEL.match(s) or s == "Unknown" for s in labels)
+    # "Unknown" means the lines were never split by speaker: naming it would hand every line to one person.
+    return bool(labels) and all(_GENERIC_LABEL.match(s) for s in labels)
 
 
 def build_naming_prompt(transcript: list[Utterance], cfg: Config) -> list[dict[str, str]]:

@@ -35,8 +35,8 @@ def _reply(payload):
     "labels,expected",
     [
         (["Speaker 1", "Speaker 12"], True),
-        (["Speaker 1", "Unknown"], True),
-        (["Unknown"], True),
+        (["Speaker 1", "Unknown"], False),
+        (["Unknown"], False),
         (["David", "Renzo"], False),
         (["Speaker 1", "David"], False),
         (["Speaker one"], False),
