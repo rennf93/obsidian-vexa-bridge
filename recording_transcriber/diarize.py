@@ -70,7 +70,10 @@ def make_windows(words: Sequence[Word], win: float = 1.5, hop: float = 0.75, min
             t += hop
         if out[-1][1] < end - 0.3:
             out.append((end - win, end))
-    return np.array(out, dtype=float).reshape(-1, 2)
+    windows = np.array(out, dtype=float).reshape(-1, 2)
+    if len(windows) > MAX_WINDOWS:  # many short speech regions get one window each and can still overshoot
+        windows = windows[np.linspace(0, len(windows) - 1, MAX_WINDOWS).astype(int)]
+    return windows
 
 
 def embed_windows(audio: np.ndarray, windows: Windows, model_path: str, num_threads: int = 4) -> np.ndarray:

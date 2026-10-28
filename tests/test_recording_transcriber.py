@@ -253,5 +253,8 @@ def test_second_session_continues_speaker_numbering(tr, monkeypatch, tmp_path):
 def test_window_count_is_capped_and_short_meetings_keep_the_hop(tr):
     long_words = [(i * 0.5, i * 0.5 + 0.4, " w") for i in range(60_000)]
     assert len(tr.diarize.make_windows(long_words)) <= tr.diarize.MAX_WINDOWS
+    # 30,000 separate 0.6 s regions: one window each, so only the final cap keeps the count down
+    choppy = [(i * 1.2, i * 1.2 + 0.6, " w") for i in range(30_000)]
+    assert len(tr.diarize.make_windows(choppy)) == tr.diarize.MAX_WINDOWS
     short = tr.diarize.make_windows(two_speaker_setup())
     assert short[1][0] - short[0][0] == pytest.approx(0.75)
