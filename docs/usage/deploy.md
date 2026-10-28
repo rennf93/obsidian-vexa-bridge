@@ -81,8 +81,8 @@ No `ports:` entry is required for this: the receiver only needs to be reachable 
 On a CPU-only box Vexa's live transcription falls behind the bot: the worker answers most chunk uploads with HTTP 503 and that audio never reaches the transcript, so a one-hour call can end with seconds of text while the recording is complete. Recording-only mode stops the bots from transcribing live and transcribes the finished recording instead, with the same model:
 
 1. Set `TRANSCRIBE_ENABLED: "false"` on Vexa's `meeting-api` service. It is the default for every bot spawn (API, dashboard, auto-join) that does not set `transcribe_enabled` itself.
-2. Add the `recording-transcriber` service from [`recording_transcriber/`](https://github.com/rennf93/obsidian-vexa-bridge/tree/master/recording_transcriber). Each pass finds completed meetings (`PLATFORMS`, ended within `LOOKBACK_HOURS`) that have a finalized `master.webm` and no transcript rows, transcribes the file with faster-whisper, and inserts every segment in one transaction, with times relative to the session start and `speaker` left empty (a single mixed recording carries no speaker labels). Done and failed meetings are kept in `/state/state.json`; a meeting stops being retried after 3 attempts.
-3. Set `LOW_TRANSCRIPT_GRACE_SECONDS` on the bridge to longer than your longest meeting takes to transcribe, so the bridge waits for the transcript instead of marking the meeting skipped on its first poll.
+2. Add the `recording-transcriber` service from [`recording_transcriber/`](https://github.com/rennf93/obsidian-vexa-bridge/tree/master/recording_transcriber). Each pass finds completed meetings (`PLATFORMS`, ended within `LOOKBACK_HOURS`) whose audio files are all final and that have no transcript rows (a meeting that already has live segments is left alone), transcribes each session's `master.webm` with faster-whisper, and inserts every segment in one transaction, with times relative to the session start and `speaker` left empty (a single mixed recording carries no speaker labels). Done and failed meetings are kept in `/state/state.json`; a meeting stops being retried after 3 attempts.
+3. Set `LOW_TRANSCRIPT_GRACE_SECONDS` on the bridge so it waits for the transcript instead of marking the meeting skipped on its first poll. Matching `LOOKBACK_HOURS` (e.g. `172800` for 48 h) means a transcriber outage shorter than that still ends in a note once the service is back; past it, clear the meeting from the bridge's `state.json` to retry.
 
 ```yaml
   recording-transcriber:
@@ -106,7 +106,7 @@ On a CPU-only box Vexa's live transcription falls behind the bot: the worker ans
     restart: unless-stopped
 ```
 
-`RECORDINGS_ROOT` (default `/storage/data/vexa`) is where the recording's `storage_path` resolves: the versitygw posix root plus the bucket name. On the reference NAS (12 cores, int8, 8 threads) a 55-minute call took about 16 minutes, so notes arrive roughly 20 minutes after the call ends with `LOW_TRANSCRIPT_GRACE_SECONDS: "21600"`.
+`RECORDINGS_ROOT` (default `/storage/data/vexa`) is where the recording's `storage_path` resolves: the versitygw posix root plus the bucket name. On the reference NAS (12 cores, int8, 8 threads, nothing else transcribing) a 55-minute recording took 936 s; meetings are done one at a time, so a backlog adds up.
 
 ## Environment
 

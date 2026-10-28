@@ -21,6 +21,7 @@ dev = [
     "mypy",
     "bandit",
     "pre-commit",
+    "psycopg[binary]",
 ]
 
 [project.urls]

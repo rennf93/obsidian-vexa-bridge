@@ -980,7 +980,8 @@ async def test_low_transcript_just_ended_with_default_grace_is_marked_skipped(tm
     assert StateStore(tmp_path / "state.json").is_done(7) is True
 
 
-async def test_low_coverage_inside_grace_is_left_pending(tmp_path, monkeypatch):
+async def test_low_coverage_inside_grace_is_still_marked_skipped(tmp_path, monkeypatch):
+    """Grace only waits for an empty transcript; a live one with a little text is final as is."""
     from summarizer.state import StateStore
 
     _patch_clients(monkeypatch, [_meeting_ended_ago(60)], utts=_utts())  # 40s / 1000s = 0.04
@@ -988,7 +989,19 @@ async def test_low_coverage_inside_grace_is_left_pending(tmp_path, monkeypatch):
     cfg.low_transcript_grace_seconds = 3600.0
     result = await m.run_once(cfg)
     assert result.skipped == 1
-    assert StateStore(tmp_path / "state.json").get(7) is None
+    assert StateStore(tmp_path / "state.json").is_done(7) is True
+
+
+async def test_short_nonempty_transcript_inside_grace_is_still_marked_skipped(tmp_path, monkeypatch):
+    from summarizer.state import StateStore
+
+    short = [Utterance("David", 0.0, 2.0, "hi")]
+    _patch_clients(monkeypatch, [_meeting_ended_ago(60)], utts=short)
+    cfg = _cfg(tmp_path)
+    cfg.low_transcript_grace_seconds = 3600.0
+    result = await m.run_once(cfg)
+    assert result.skipped == 1
+    assert StateStore(tmp_path / "state.json").is_done(7) is True
 
 
 async def test_late_transcript_is_summarized_on_a_later_pass(tmp_path, monkeypatch):
