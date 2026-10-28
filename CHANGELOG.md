@@ -4,9 +4,15 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-29
+
 ### Added
 - `recording_transcriber` splits transcripts by speaker: after faster-whisper (now with word timestamps) it clusters TitaNet small speaker embeddings (sherpa-onnx, scipy; windows of 1.5 s, average-linkage cosine cut at 0.75, small clusters merged, labels smoothed) and writes one row per utterance labelled `Speaker 1`, `Speaker 2`, ... (numbered across all sessions of a meeting; the hop widens so a very long meeting stays at or under 10,000 windows, which bounds memory). The image fetches the model at build time and verifies its sha256. `DIARIZATION_ENABLED` (default `true`) and `DIARIZATION_MODEL` configure it; when it is off, the model is missing or it fails, the transcript is written as before with no speaker. Calibrated on one 55 minute 2-speaker meeting only. Pair it with `SPEAKER_NAMING_ENABLED` to turn the labels into names.
 - `SPEAKER_NAMING_ENABLED` (default `false`, which keeps the old behavior) and `OWNER_NAME`: when a transcript has at least 2 distinct speaker labels and every one is generic (`Speaker N`; `Unknown`, an unsplit transcript, and a lone `Speaker 1` from a collapsed diarization are never named), the bridge asks the LLM once to name them from the conversation (direct address, self-introduction, the owner hint) and applies the names before summarizing, so the note, its frontmatter participants and its filename use them. The reply is validated (JSON object, known labels only, names of at most 40 characters made only of letters (any script), spaces, hyphens, apostrophes and periods and starting with a letter, so they are safe in YAML frontmatter, wikilinks and filenames, no two labels sharing a name); any failure keeps the generic labels and never fails the meeting. Already-named transcripts make no extra call. Works in note and graph mode, which now reads `AI_*` for this.
+
+### Changed
+- The `recording_transcriber` image now runs `python -m recording_transcriber.transcribe_recordings` with its files under `/app/recording_transcriber/` (`PYTHONPATH=/app`). A compose `command:` or `entrypoint:` override that called `/app/transcribe_recordings.py` must use the module form; the image's own entrypoint needs no change.
+
 ### Fixed
 - `recording_transcriber` no longer shows `unhealthy`: its image inherited the transcription worker's `HEALTHCHECK` (`curl http://localhost:8000/health`), an HTTP endpoint this batch job does not serve. The Dockerfile now sets `HEALTHCHECK NONE`.
 
