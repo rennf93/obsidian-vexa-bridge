@@ -4,7 +4,8 @@
 # BASE_IMAGE is whatever tag your transcription-worker service runs.
 ARG BASE_IMAGE=vexa-transcription:cpu-v012
 FROM ${BASE_IMAGE}
-RUN uv pip install --python /opt/venv/bin/python --no-cache "psycopg[binary]==3.3.6" "sherpa-onnx==1.13.8" "scipy==1.18.1"
+RUN uv pip install --python /opt/venv/bin/python --no-cache "psycopg[binary]==3.3.6" "sherpa-onnx==1.13.8" "scipy==1.17.1"
+# scipy 1.17.x keeps the base image's numpy 1.26.4 (1.18 needs numpy 2 and would upgrade it under faster-whisper).
 # NeMo TitaNet small speaker embeddings (40 MB). The base image has curl but no sha256sum, so python verifies it.
 RUN mkdir -p /app/diarization \
     && curl -fsSL -o /app/diarization/titanet_small.onnx \
