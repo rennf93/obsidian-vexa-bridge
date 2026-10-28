@@ -35,6 +35,7 @@ def _reply(payload):
     "labels,expected",
     [
         (["Speaker 1", "Speaker 12"], True),
+        (["Speaker 1"], False),
         (["Speaker 1", "Unknown"], False),
         (["Unknown"], False),
         (["David", "Renzo"], False),
@@ -80,6 +81,13 @@ async def test_prompt_without_owner_has_no_owner_line():
         {"Speaker 1": ""},
         {"Speaker 1": "Ana\nBob"},
         {"Speaker 1": "a/b"},
+        {"Speaker 1": "*Bob"},
+        {"Speaker 1": "Bob #1"},
+        {"Speaker 1": "[[X]]"},
+        {"Speaker 1": "Bob|Al"},
+        {"Speaker 1": "Bob^"},
+        {"Speaker 1": "-Bob"},
+        {"Speaker 1": "Bob2"},
         {"Speaker 1": 5},
     ],
 )
@@ -124,3 +132,8 @@ async def test_already_named_transcript_makes_no_call():
     call_api, calls = _reply({"David": "X"})
     assert await speakers.name_speakers(named, _cfg(), call_api) == named
     assert calls == []
+
+
+@pytest.mark.parametrize("name", ["José", "Zoë", "Dmitry", "Анна", "Mary-Jane", "O'Brien", "J. R. Smith"])
+def test_safe_names_pass(name):
+    assert speakers.parse_speaker_names(json.dumps({"Speaker 1": name}), {"Speaker 1"}) == {"Speaker 1": name}

@@ -224,3 +224,34 @@ def test_diarized_rows_carry_speaker_labels(tr, monkeypatch, tmp_path):
 
     tr.run_pass(WordModel())
     assert [(r[4], r[7]) for r in tr.inserted] == [("Speaker 1", "rec:uid:0"), ("Speaker 2", "rec:uid:1")]
+
+
+def test_empty_diarized_rows_fall_back_to_segments(tr, monkeypatch, tmp_path):
+    model_file = tmp_path / "m.onnx"
+    model_file.write_bytes(b"x")
+    monkeypatch.setattr(tr, "DIARIZATION_ENABLED", True)
+    monkeypatch.setattr(tr, "DIARIZATION_MODEL", model_file)
+
+    class NoWordsModel(FakeModel):
+        def transcribe(self, path, **kwargs):
+            seg = types.SimpleNamespace(start=1.0, end=2.5, text=" hello ", words=None)
+            return iter([seg]), types.SimpleNamespace(language="en", duration=5.0)
+
+    tr.run_pass(NoWordsModel())
+    assert tr.inserted == [(14, 51.0, 52.5, "hello", None, "en", "uid", "rec:uid:0")]
+
+
+def test_second_session_continues_speaker_numbering(tr, monkeypatch, tmp_path):
+    monkeypatch.setattr(tr.diarize, "diarize", lambda audio, words, path: [0, 1])
+    words = [(1.0, 1.5, " hi"), (1.6, 2.0, " yo")]
+    first = tr.diarized_rows(np.zeros(1), words, 0.0, "en", "a")
+    top = max(int(r[3].split()[1]) for r in first)
+    second = tr.diarized_rows(np.zeros(1), words, 0.0, "en", "b", top)
+    assert [r[3] for r in first + second] == ["Speaker 1", "Speaker 2", "Speaker 3", "Speaker 4"]
+
+
+def test_window_count_is_capped_and_short_meetings_keep_the_hop(tr):
+    long_words = [(i * 0.5, i * 0.5 + 0.4, " w") for i in range(60_000)]
+    assert len(tr.diarize.make_windows(long_words)) <= tr.diarize.MAX_WINDOWS
+    short = tr.diarize.make_windows(two_speaker_setup())
+    assert short[1][0] - short[0][0] == pytest.approx(0.75)

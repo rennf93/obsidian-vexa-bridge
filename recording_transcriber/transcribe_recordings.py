@@ -105,17 +105,23 @@ def load_model() -> WhisperModel:
 
 
 def diarized_rows(
-    audio: np.ndarray, words: list[diarize.Word], offset_s: float, language: str, session_uid: str
+    audio: np.ndarray,
+    words: list[diarize.Word],
+    offset_s: float,
+    language: str,
+    session_uid: str,
+    first_label: int = 0,
 ) -> list[tuple]:
     """One row per utterance with a `Speaker N` label.
 
-    Speakers are numbered per session, so a meeting with several sessions can reuse a label for a different
-    person in each; the bridge's speaker naming works on the transcript as a whole and names what it can.
+    Numbering starts after first_label, the highest label used by earlier sessions of the same meeting, so a
+    label never stands for two sessions' speakers (the bridge's speaker naming maps labels meeting-wide).
     """
     speakers = diarize.diarize(audio, words, str(DIARIZATION_MODEL))
+    utterances = diarize.build_utterances(words, speakers, first_label=first_label)
     return [
         (offset_s + start, offset_s + end, text, label, language, session_uid, f"rec:{session_uid}:{i}")
-        for i, (start, end, label, text) in enumerate(diarize.build_utterances(words, speakers))
+        for i, (start, end, label, text) in enumerate(utterances)
     ]
 
 
@@ -131,7 +137,9 @@ def segment_rows(segments: list, offset_s: float, language: str, session_uid: st
     return rows
 
 
-def transcribe_session(model: WhisperModel, audio: Path, offset_s: float, session_uid: str) -> list[tuple]:
+def transcribe_session(
+    model: WhisperModel, audio: Path, offset_s: float, session_uid: str, first_label: int = 0
+) -> list[tuple]:
     """Rows for one session's recording; times are relative to the session start, as Vexa stores them."""
     started = time.monotonic()
     samples = decode_audio(str(audio), sampling_rate=diarize.SAMPLE_RATE)
@@ -143,7 +151,9 @@ def transcribe_session(model: WhisperModel, audio: Path, offset_s: float, sessio
     if DIARIZATION_ENABLED and DIARIZATION_MODEL.is_file():
         try:
             words = [(w.start, w.end, w.word) for seg in segments for w in (seg.words or [])]
-            rows = diarized_rows(samples, words, offset_s, info.language, session_uid)
+            rows = diarized_rows(samples, words, offset_s, info.language, session_uid, first_label) or None
+            if rows is None and any(seg.text.strip() for seg in segments):
+                log.warning("%s: no word timestamps to diarize, keeping one row per segment", audio.name)
         except Exception:
             # The transcript must not be lost or delayed by the speaker split.
             log.exception("%s: diarization failed, keeping one row per segment", audio.name)
@@ -185,10 +195,13 @@ def run_pass(model: WhisperModel, meeting: int | None = None, dry_run: bool = Fa
             state[key] = {"status": "running", "attempts": attempts, "at": dt.datetime.now(dt.UTC).isoformat()}
             save_state(state)
         try:
-            rows = []
+            rows: list[tuple] = []
             for session_uid, session_start, recording_start, storage_path in recs:
                 offset_s = max(0.0, (recording_start - session_start).total_seconds())
-                for row in transcribe_session(model, RECORDINGS_ROOT / storage_path, offset_s, session_uid):
+                first_label = max((int(r[4].split()[1]) for r in rows if r[4]), default=0)
+                for row in transcribe_session(
+                    model, RECORDINGS_ROOT / storage_path, offset_s, session_uid, first_label
+                ):
                     rows.append((meeting_id, *row))
             if dry_run:
                 log.info("[dry-run] meeting %s: %d rows, first: %s", meeting_id, len(rows), rows[:3])

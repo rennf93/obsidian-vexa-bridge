@@ -9,6 +9,10 @@ found without being told, 95.9% word accuracy, about 56 s per audio hour at 4 th
 Limits: not validated on other meetings, 3 or more speakers, noisy audio or overlapping speech. The plateau
 around the 0.75 cut is about 0.1 wide, and a quiet speaker under 5% of the speech (or 20 s) is merged away.
 
+Memory: average linkage keeps the condensed distance matrix of all windows (about 890 MB at 9,599 windows,
+quadratic growth), so make_windows widens the hop to keep the total at or under MAX_WINDOWS (10,000). The
+0.75 s hop is kept for any meeting under the cap (roughly 2 hours of speech).
+
 Words are (start_s, end_s, text) tuples in seconds. Diarization never raises on short or empty input: with no
 words, fewer than 2 windows or a single cluster every word is speaker 0.
 """
@@ -24,6 +28,7 @@ SAMPLE_RATE = 16000
 THRESHOLD = 0.75
 SMOOTH_WORDS = 3
 MIN_RUN_SECONDS = 1.0
+MAX_WINDOWS = 10_000
 MAX_UTTERANCE_GAP_SECONDS = 2.0
 MAX_UTTERANCE_SECONDS = 40.0
 
@@ -44,9 +49,16 @@ def speech_regions(words: Sequence[Word], max_gap: float = 0.5) -> list[list[flo
 
 
 def make_windows(words: Sequence[Word], win: float = 1.5, hop: float = 0.75, min_len: float = 0.5) -> Windows:
-    """Fixed windows over word-covered time; a region shorter than win is one window, tiny ones are skipped."""
+    """Fixed windows over word-covered time; a region shorter than win is one window, tiny ones are skipped.
+
+    The hop is widened when needed so the total stays at or under MAX_WINDOWS.
+    """
+    regions = speech_regions(words)
+    covered = sum(end - start for start, end in regions)
+    # One extra window per region for the tail window, so budget for it up front.
+    hop = max(hop, (covered - win * len(regions)) / max(MAX_WINDOWS - 2 * len(regions), 1))
     out: list[tuple[float, float]] = []
-    for start, end in speech_regions(words):
+    for start, end in regions:
         if end - start < min_len:
             continue
         if end - start <= win:
@@ -192,8 +204,13 @@ def build_utterances(
     speakers: Sequence[int],
     max_gap: float = MAX_UTTERANCE_GAP_SECONDS,
     max_length: float = MAX_UTTERANCE_SECONDS,
+    first_label: int = 0,
 ) -> list[tuple[float, float, str, str]]:
-    """(start, end, label, text) per run of one speaker, split at gaps over max_gap or past max_length seconds."""
+    """(start, end, label, text) per run of one speaker, split at gaps over max_gap or past max_length seconds.
+
+    Labels are `Speaker N` with N = speaker index + first_label + 1, so later sessions of a meeting can continue
+    the numbering instead of reusing it.
+    """
     utterances: list[tuple[float, float, str, str]] = []
     run: list[Word] = []
     run_speaker = 0
@@ -201,7 +218,7 @@ def build_utterances(
     def flush() -> None:
         text = "".join(w[2] for w in run).strip()
         if text:
-            utterances.append((run[0][0], run[-1][1], f"Speaker {run_speaker + 1}", text))
+            utterances.append((run[0][0], run[-1][1], f"Speaker {run_speaker + first_label + 1}", text))
 
     for word, speaker in zip(words, speakers, strict=True):
         if run and (speaker != run_speaker or word[0] - run[-1][1] > max_gap or word[1] - run[0][0] > max_length):

@@ -26,8 +26,9 @@ log = logging.getLogger("vexa-summarizer")
 
 MAX_NAME_CHARS = 40
 _GENERIC_LABEL = re.compile(r"^Speaker \d+$")
-# Names become part of the note filename: path separators and ':' would break or escape it.
-_FORBIDDEN_NAME_CHARS = re.compile(r"[\\/:\r\n]")
+# Names go unquoted into YAML frontmatter and into the note filename, so only letters (any script), spaces,
+# hyphens, apostrophes and periods are allowed, starting with a letter: no YAML, wikilink or path syntax.
+_SAFE_NAME = re.compile(r"[^\W\d_](?:[^\W\d_]|[ '.-])*")
 
 SYSTEM_PROMPT = """\
 You identify who the speakers of a diarized meeting transcript are. The speakers are labeled \
@@ -44,8 +45,9 @@ exactly as written in the transcript and whose values are first names. Example: 
 
 def has_generic_speakers(transcript: list[Utterance]) -> bool:
     labels = {u.speaker for u in transcript}
-    # "Unknown" means the lines were never split by speaker: naming it would hand every line to one person.
-    return bool(labels) and all(_GENERIC_LABEL.match(s) for s in labels)
+    # "Unknown" (never split by speaker) or a single label (diarization collapsed to one) would hand every line
+    # to one person, so naming needs at least 2 distinct generic labels.
+    return len(labels) >= 2 and all(_GENERIC_LABEL.match(s) for s in labels)
 
 
 def build_naming_prompt(transcript: list[Utterance], cfg: Config) -> list[dict[str, str]]:
@@ -74,7 +76,7 @@ def parse_speaker_names(raw: str, labels: set[str]) -> dict[str, str]:
         if not isinstance(name, str):
             raise ValueError(f"name for {label!r} is not a string")
         name = name.strip()
-        if not name or len(name) > MAX_NAME_CHARS or _FORBIDDEN_NAME_CHARS.search(name):
+        if len(name) > MAX_NAME_CHARS or not _SAFE_NAME.fullmatch(name):
             raise ValueError(f"invalid name for {label!r}")
         mapping[label] = name
     if len({n.casefold() for n in mapping.values()}) != len(mapping):
