@@ -14,6 +14,7 @@
       VEXA_API_KEY: "${VEXA_SUMMARIZER_TOKEN}"        # per-user tx token, minted once
       SUMMARIZE_PLATFORMS: "discord,google_meet,zoom" # all platforms — Zoom parity is this one var
       MIN_TRANSCRIPT_SECONDS: "30"
+      LOW_TRANSCRIPT_GRACE_SECONDS: "0"               # >0: keep a just-ended meeting with an empty transcript pending (late transcription)
       AI_MODEL: "openai/qwen2.5:7b"                   # whatever you `ollama pull` on the NAS
       AI_BASE_URL: "http://ollama:11434/v1"           # NAS ollama container (ollama_default net)
       AI_API_KEY: "not-needed"                        # ollama ignores it; litellm requires a value

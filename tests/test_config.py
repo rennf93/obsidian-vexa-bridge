@@ -128,6 +128,16 @@ def test_min_transcript_coverage_default_and_override():
     assert cfg.min_transcript_coverage == 0.1
 
 
+def test_low_transcript_grace_default_override_and_negative():
+    assert config.load_config(_base_env()).low_transcript_grace_seconds == 0.0
+    env = _base_env()
+    env["LOW_TRANSCRIPT_GRACE_SECONDS"] = "5400"
+    assert config.load_config(env).low_transcript_grace_seconds == 5400.0
+    env["LOW_TRANSCRIPT_GRACE_SECONDS"] = "-1"
+    with pytest.raises(config.ConfigError, match="LOW_TRANSCRIPT_GRACE_SECONDS"):
+        config.load_config(env)
+
+
 # --- per-sink required-var enforcement -------------------------------------
 
 

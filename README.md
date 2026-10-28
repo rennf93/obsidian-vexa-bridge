@@ -106,6 +106,7 @@ All vars come from `summarizer/config.py`. "Required when" is conditional — th
 | `SUMMARIZE_PLATFORMS` | never | `discord` | CSV of platforms to summarize, e.g. `discord,google_meet,zoom`. Zoom/Meet parity is this one var. |
 | `MIN_TRANSCRIPT_SECONDS` | never | `30` | Skip meetings with less than this much speech; skipped, not summarized. |
 | `MIN_TRANSCRIPT_COVERAGE` | never | `0.05` | Skip meetings (at least 300s wall clock) where speech seconds / wall-clock seconds falls below this ratio, e.g. Vexa's transcription worker rejected most of the audio. `0` disables the gate. |
+| `LOW_TRANSCRIPT_GRACE_SECONDS` | never | `0` | A meeting whose transcript is still empty and that ended less than this many seconds ago is left pending for a later poll instead of being marked skipped, so a transcript that lands after the meeting completes (recording-only bots transcribed later) is still summarized. A meeting with any transcript goes through the gates as before. `0` keeps the old behavior: skip immediately. Must be >= 0. |
 | `OBSIDIAN_ENABLED` | never | `true` | Write an Obsidian note per meeting. |
 | `OBSIDIAN_SINK` | `OBSIDIAN_ENABLED=true` | `fs` | Sink type: `fs` (filesystem, `VAULT_DIR`) or `mcp` (vault-as-mcp HTTP, `OBSIDIAN_MCP_URL`). |
 | `VAULT_DIR` | `OBSIDIAN_ENABLED=true` and `OBSIDIAN_SINK=fs` | - | Host folder bind-mounted into the container (e.g. `/vault`); Syncthing mirrors it into the Mac vault. No sane default in a container. |
@@ -152,6 +153,8 @@ Add this service to your Vexa `docker-compose.yaml` (same network as `gateway`).
 `ollama` is an external network (`ollama_default`) so the adapter can reach the NAS ollama container; `obsidian-state` is a named volume for `state.json`. Mint the tx token once on the NAS with `scripts/mint_token.sh` and append the printed `VEXA_SUMMARIZER_TOKEN=…` line to your `.env` — the script never writes the `.env` itself and never prints the full token.
 
 **Syncthing**: share the NAS host folder bound to `/vault` (e.g. `/volume1/vexa-obsidian-notes`) with a folder inside your Mac Obsidian vault (`Renn's Vault/Meetings`). Notes written on the NAS appear in Obsidian on the Mac with no Mac-side runner required.
+
+**CPU-only Vexa**: if live transcription drops most of the audio (worker 503s, near-empty transcripts for long calls), run the bots recording-only and let [`recording_transcriber/`](recording_transcriber/) transcribe each finished recording; the setup is in [Deploy: recording-only mode](docs/usage/deploy.md#docker-compose-recording-only-mode-cpu-hosts).
 
 ---
 
