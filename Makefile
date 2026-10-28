@@ -23,11 +23,11 @@ fix: ## Auto-fix lint + format
 
 .PHONY: typecheck
 typecheck: ## Run mypy
-	uv run mypy summarizer
+	uv run mypy summarizer recording_transcriber
 
 .PHONY: security
 security: ## Run bandit security scan
-	uv run bandit -r summarizer -ll
+	uv run bandit -r summarizer recording_transcriber -ll
 
 .PHONY: test
 test: ## Run the unit test suite

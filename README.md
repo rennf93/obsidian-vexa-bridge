@@ -154,6 +154,8 @@ Add this service to your Vexa `docker-compose.yaml` (same network as `gateway`).
 
 **Syncthing**: share the NAS host folder bound to `/vault` (e.g. `/volume1/vexa-obsidian-notes`) with a folder inside your Mac Obsidian vault (`Renn's Vault/Meetings`). Notes written on the NAS appear in Obsidian on the Mac with no Mac-side runner required.
 
+**CPU-only Vexa**: if live transcription drops most of the audio (worker 503s, near-empty transcripts for long calls), run the bots recording-only and let [`recording_transcriber/`](recording_transcriber/) transcribe each finished recording; the setup is in [Deploy: recording-only mode](docs/usage/deploy.md#docker-compose-recording-only-mode-cpu-hosts).
+
 ---
 
 ## Idempotency & poison model

@@ -20,14 +20,14 @@ repos:
     hooks:
       - id: mypy
         name: mypy
-        entry: uv run mypy summarizer
+        entry: uv run mypy summarizer recording_transcriber
         require_serial: true
         language: system
         types: [python]
         pass_filenames: false
       - id: bandit
         name: bandit
-        entry: uv run bandit -r summarizer -ll
+        entry: uv run bandit -r summarizer recording_transcriber -ll
         require_serial: true
         language: system
         types: [python]
