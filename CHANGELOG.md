@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-28
+
 ### Added
 - `LOW_TRANSCRIPT_GRACE_SECONDS` (default `0`, which keeps the old behavior): when above zero, a meeting that ended less than that many seconds ago and trips the `MIN_TRANSCRIPT_SECONDS` or `MIN_TRANSCRIPT_COVERAGE` gate on the poll path is left pending instead of being marked skipped, the same way the webhook path already behaves. Recording-only bots are transcribed 10 to 60 minutes after the meeting completes, so the first poll sees an empty transcript; past the grace window the gates mark the meeting skipped as before. A negative value is a `ConfigError`.
 - `recording_transcriber/`: post-meeting transcription for CPU-only Vexa hosts whose live transcription rejects most of the bot's audio (HTTP 503 once the worker falls behind). With the bots set recording-only (`TRANSCRIBE_ENABLED=false` on `meeting-api`), it finds completed meetings that have a finalized `master.webm` and no transcript rows, transcribes the recording with the worker's own faster-whisper model, and inserts the whole transcript in one transaction (times relative to the session start, `speaker` empty). Done and failed meetings are tracked in its own `state.json`, an attempt is counted before the work starts so a crash cannot loop, and a meeting stops after 3 attempts. Setup: [Deploy: recording-only mode](docs/usage/deploy.md#docker-compose-recording-only-mode-cpu-hosts).
