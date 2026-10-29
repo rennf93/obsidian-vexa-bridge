@@ -340,3 +340,25 @@ def test_webhook_commit_wait_read_in_graph_mode_too():
     )
     assert cfg.webhook_commit_wait_seconds == 90.0
     assert cfg.webhook_commit_poll_seconds == 10.0
+
+
+def test_speaker_naming_defaults_off_and_parses():
+    cfg = config.load_config(_base_env())
+    assert cfg.speaker_naming_enabled is False
+    assert cfg.owner_name is None
+    env = {**_base_env(), "SPEAKER_NAMING_ENABLED": "true", "OWNER_NAME": "  Renzo "}
+    cfg = config.load_config(env)
+    assert cfg.speaker_naming_enabled is True
+    assert cfg.owner_name == "Renzo"
+
+
+@pytest.mark.parametrize("bad", ["A" * 41, "a/b", "a:b", "a\\b", "a\nb"])
+def test_owner_name_validated(bad):
+    with pytest.raises(config.ConfigError, match="OWNER_NAME"):
+        config.load_config({**_base_env(), "OWNER_NAME": bad})
+
+
+def test_graph_mode_still_reads_ai_settings_for_speaker_naming():
+    env = {**_base_env(), "BRIDGE_MODE": "graph", "AI_BASE_URL": "http://ollama:11434/v1"}
+    cfg = config.load_config(env)
+    assert cfg.ai_base_url == "http://ollama:11434/v1" and cfg.ai_api_key == "sk-test"

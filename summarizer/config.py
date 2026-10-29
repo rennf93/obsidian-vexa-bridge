@@ -26,6 +26,7 @@ DEFAULT_PLATFORMS = ["discord"]
 DEFAULT_MIN_SECONDS = 30.0
 DEFAULT_MIN_COVERAGE = 0.05
 DEFAULT_LOW_TRANSCRIPT_GRACE_SECONDS = 0.0
+MAX_OWNER_NAME_CHARS = 40
 DEFAULT_OBSIDIAN_URL = "http://localhost:8765/mcp"
 DEFAULT_NOTE_FOLDER = "Meetings"
 DEFAULT_STATE_DIR = Path.home() / ".local" / "share" / "vexa-summarizer"
@@ -60,6 +61,8 @@ class Config:
     min_transcript_seconds: float = DEFAULT_MIN_SECONDS
     min_transcript_coverage: float = DEFAULT_MIN_COVERAGE
     low_transcript_grace_seconds: float = DEFAULT_LOW_TRANSCRIPT_GRACE_SECONDS
+    speaker_naming_enabled: bool = False
+    owner_name: str | None = None
     obsidian_enabled: bool = True
     obsidian_mcp_url: str = DEFAULT_OBSIDIAN_URL
     obsidian_mcp_token: str | None = None
@@ -126,6 +129,12 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
     )
     if cfg.low_transcript_grace_seconds < 0:
         raise ConfigError(f"LOW_TRANSCRIPT_GRACE_SECONDS must be >= 0, got {cfg.low_transcript_grace_seconds}")
+    cfg.speaker_naming_enabled = _bool(env.get("SPEAKER_NAMING_ENABLED", "false"))
+    cfg.owner_name = (env.get("OWNER_NAME") or "").strip() or None
+    if cfg.owner_name and (len(cfg.owner_name) > MAX_OWNER_NAME_CHARS or any(c in cfg.owner_name for c in "\r\n/\\:")):
+        raise ConfigError(
+            f"OWNER_NAME must be at most {MAX_OWNER_NAME_CHARS} characters with no newline, '/', '\\' or ':'"
+        )
     cfg.dry_run = _bool(env.get("DRY_RUN", "false"))
     state_dir = (env.get("STATE_DIR") or "").strip()
     cfg.state_dir = Path(state_dir) if state_dir else DEFAULT_STATE_DIR
@@ -153,8 +162,13 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
     else:
         cfg.webhook_secret = (env.get("WEBHOOK_SECRET") or "").strip() or None
 
+    # Note mode summarizes with these; in graph mode only speaker naming uses them.
+    cfg.ai_model = env.get("AI_MODEL", DEFAULT_AI_MODEL).strip() or DEFAULT_AI_MODEL
+    cfg.ai_api_key = (env.get("AI_API_KEY") or "").strip() or None  # "not-needed" for local
+    cfg.ai_base_url = (env.get("AI_BASE_URL") or "").strip() or None
+
     if cfg.bridge_mode == "graph":
-        # No LLM and no note sink: the agent on the Vexa side does the writing. VAULT_DIR is
+        # No summary LLM and no note sink: the agent on the Vexa side does the writing. VAULT_DIR is
         # optional here; when set, the bridge fast-forwards <VAULT_DIR>/<VEXA_VAULT_FOLDER>.
         vault_dir = (env.get("VAULT_DIR") or "").strip()
         cfg.vault_dir = Path(vault_dir) if vault_dir else None
@@ -163,9 +177,6 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
         cfg.graph_routine_cron = env.get("GRAPH_ROUTINE_CRON", DEFAULT_ROUTINE_CRON).strip() or DEFAULT_ROUTINE_CRON
         return cfg
 
-    cfg.ai_model = env.get("AI_MODEL", DEFAULT_AI_MODEL).strip() or DEFAULT_AI_MODEL
-    cfg.ai_api_key = (env.get("AI_API_KEY") or "").strip() or None  # "not-needed" for local
-    cfg.ai_base_url = (env.get("AI_BASE_URL") or "").strip() or None
     cfg.obsidian_enabled = _bool(env.get("OBSIDIAN_ENABLED", "true"))
     cfg.obsidian_sink = env.get("OBSIDIAN_SINK", DEFAULT_OBSIDIAN_SINK).strip() or DEFAULT_OBSIDIAN_SINK
     cfg.obsidian_mcp_url = env.get("OBSIDIAN_MCP_URL", DEFAULT_OBSIDIAN_URL).strip() or DEFAULT_OBSIDIAN_URL

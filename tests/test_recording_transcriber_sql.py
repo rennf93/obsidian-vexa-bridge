@@ -102,7 +102,9 @@ MEETINGS = [
 
 @pytest.fixture
 def db(monkeypatch):
-    monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=object))
+    monkeypatch.setitem(
+        sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=object, decode_audio=lambda *a, **k: None)
+    )
     monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
     module = importlib.reload(importlib.import_module("recording_transcriber.transcribe_recordings"))
     schema = f"rt_{uuid.uuid4().hex[:12]}"
@@ -152,11 +154,13 @@ def test_meeting_flag_ignores_the_lookback_but_not_the_other_rules(db):
 
 def test_insert_is_idempotent_and_takes_the_meeting_out_of_the_candidates(db):
     module, conn = db
-    row = (1, 51.0, 52.5, "hello", "en", "s1", "rec:s1:0")
+    row = (1, 51.0, 52.5, "hello", "Speaker 1", "en", "s1", "rec:s1:0")
+    fallback = (1, 53.0, 54.0, "again", None, "en", "s1", "rec:s1:1")
     with conn.transaction():
-        conn.cursor().executemany(module.INSERT_SQL, [row, row])
+        conn.cursor().executemany(module.INSERT_SQL, [row, row, fallback])
     stored = conn.execute(
         "SELECT start_time, text, speaker, created_at IS NOT NULL FROM transcriptions WHERE meeting_id = 1"
+        " ORDER BY start_time"
     )
-    assert stored.fetchall() == [(51.0, "hello", None, True)]
+    assert stored.fetchall() == [(51.0, "hello", "Speaker 1", True), (53.0, "again", None, True)]
     assert [r[0] for r in _candidates(module, conn)] == [6, 6, 9]

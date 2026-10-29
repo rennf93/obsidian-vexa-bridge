@@ -1019,3 +1019,110 @@ async def test_late_transcript_is_summarized_on_a_later_pass(tmp_path, monkeypat
     _patch_clients(monkeypatch, [meeting], utts=_utts(), create_note_fn=create_note)
     assert (await m.run_once(cfg)).summarized == 1
     assert len(created) == 1
+
+
+def _generic_utts():
+    return [
+        Utterance("Speaker 1", 0.0, 20.0, "Hi Maria."),
+        Utterance("Speaker 2", 20.0, 40.0, "Hi Renzo."),
+    ]
+
+
+def _patch_naming(monkeypatch, mapping, calls):
+    # Patch the LLM seam inside speakers; name_speakers itself runs for real.
+    import json
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs)
+        return json.dumps(mapping)
+
+    class _FakeLitellm:
+        completion = staticmethod(fake_completion)
+
+    monkeypatch.setitem(__import__("sys").modules, "litellm", _FakeLitellm)
+
+
+async def test_note_mode_applies_names_to_participants_and_filename(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.speaker_naming_enabled = True
+    cfg.owner_name = "Renzo"
+    calls = []
+    seen = {}
+    created = []
+
+    async def fake_create(cfg_, path, content):
+        created.append((path, content))
+
+    _patch_clients(
+        monkeypatch,
+        [_meeting()],
+        utts=_generic_utts(),
+        summarize_fn=lambda t, meta, c: seen.update(participants=meta.participants) or _GOOD_MD,
+        create_note_fn=fake_create,
+    )
+    _patch_naming(monkeypatch, {"Speaker 1": "Maria", "Speaker 2": "Renzo"}, calls)
+    result = await m.run_once(cfg)
+    assert result.summarized == 1 and len(calls) == 1
+    assert seen["participants"] == ["Maria", "Renzo"]
+    path, content = created[0]
+    assert "Maria & Renzo" in path and "Speaker" not in path
+    assert "Maria" in content and "Speaker 1" not in content
+
+
+async def test_naming_failure_still_writes_note_with_generic_labels(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.speaker_naming_enabled = True
+    created = []
+
+    async def fake_create(cfg_, path, content):
+        created.append(path)
+
+    _patch_clients(monkeypatch, [_meeting()], utts=_generic_utts(), create_note_fn=fake_create)
+
+    def boom(**_):
+        raise RuntimeError("llm down")
+
+    class _FakeLitellm:
+        completion = staticmethod(boom)
+
+    monkeypatch.setitem(__import__("sys").modules, "litellm", _FakeLitellm)
+    result = await m.run_once(cfg)
+    assert result.summarized == 1 and result.failed == 0
+    assert "Speaker 1 & Speaker 2" in created[0]
+
+
+async def test_disabled_flag_makes_no_naming_call(tmp_path, monkeypatch):
+    calls = []
+    _patch_clients(monkeypatch, [_meeting()], utts=_generic_utts())
+    _patch_naming(monkeypatch, {"Speaker 1": "Maria"}, calls)
+    result = await m.run_once(_cfg(tmp_path))
+    assert result.summarized == 1 and calls == []
+
+
+async def test_already_named_transcript_makes_no_naming_call(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.speaker_naming_enabled = True
+    calls = []
+    _patch_clients(monkeypatch, [_meeting()])  # David / Renzo
+    _patch_naming(monkeypatch, {"David": "X"}, calls)
+    result = await m.run_once(cfg)
+    assert result.summarized == 1 and calls == []
+
+
+async def test_graph_mode_uploads_renamed_transcript(tmp_path, monkeypatch):
+    cfg = _graph_cfg(tmp_path)
+    cfg.speaker_naming_enabled = True
+    calls = []
+    uploaded = []
+
+    async def upload_fn(cfg_, filename, content):
+        uploaded.append((filename, content))
+        return f"uploads/{filename}"
+
+    _patch_graph(monkeypatch, [_meeting()], utts=_generic_utts(), upload_fn=upload_fn)
+    _patch_naming(monkeypatch, {"Speaker 1": "Maria", "Speaker 2": "Renzo"}, calls)
+    result = await m.run_once(cfg)
+    assert result.uploaded == 1 and len(calls) == 1
+    filename, content = uploaded[0]
+    assert "Maria" in content and "Speaker 1" not in content
+    assert "Speaker" not in filename
